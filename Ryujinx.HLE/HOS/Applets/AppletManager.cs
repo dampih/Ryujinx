@@ -13,8 +13,8 @@ namespace Ryujinx.HLE.HOS.Applets
             _appletMapping = new Dictionary<AppletId, Type>
             {
                 { AppletId.PlayerSelect,     typeof(PlayerSelectApplet)     },
-                { AppletId.SoftwareKeyboard, typeof(SoftwareKeyboardApplet) },
-                { AppletId.Controller,       typeof(PlayerSelectApplet)     }
+                { AppletId.Controller,       typeof(ControllerApplet)       },
+                { AppletId.SoftwareKeyboard, typeof(SoftwareKeyboardApplet) }
             };
         }
 
