@@ -1,33 +1,17 @@
-using System;
-using System.Collections.Generic;
-using System.Text;
 using Ryujinx.HLE.HOS.Services.Arp;
 
 namespace Ryujinx.HLE.HOS.Services.Bcat.ServiceCreator
 {
-    class IDeliveryCacheDirectoryService : IpcService
+    internal class IDeliveryCacheDirectoryService : IpcService
     {
-    
-      public IDeliveryCacheDirectoryService(ServiceCtx context, ApplicationLaunchProperty applicationLaunchProperty)
-      {
-      
-      }
-      [Command(0)]
-      public ResultCode Open(ServiceCtx context)
-      {
-            return ResultCode.Success;
-       }
-       
-       [Command(1)]
-       public ResultCode Open(ServiceCtx context)
-      {
-            return ResultCode.Success;
-       }
-      
-      [Command(2)]
-       public ResultCode Open(ServiceCtx context)
-      {
-            return ResultCode.Success;
-       }
+        private ApplicationLaunchProperty applicationLaunchProperty;
+
+        public IDeliveryCacheDirectoryService(ApplicationLaunchProperty applicationLaunchProperty)
+        {
+            this.applicationLaunchProperty = applicationLaunchProperty;
+        }
+
+
+
     }
 }
