@@ -13,19 +13,19 @@ namespace Ryujinx.HLE.HOS.Services.Bcat.ServiceCreator
       
       }
       [Command(0)]
-      public ResultCode Open(serviceCtx Context)
+      public ResultCode Open(ServiceCtx context)
       {
             return ResultCode.Success;
        }
        
        [Command(1)]
-       public ResultCode Open(serviceCtx Context)
+       public ResultCode Open(ServiceCtx context)
       {
             return ResultCode.Success;
        }
       
       [Command(2)]
-       public ResultCode Open(serviceCtx Context)
+       public ResultCode Open(ServiceCtx context)
       {
             return ResultCode.Success;
        }
