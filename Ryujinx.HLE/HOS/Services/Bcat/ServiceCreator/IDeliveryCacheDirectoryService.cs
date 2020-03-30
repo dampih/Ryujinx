@@ -29,3 +29,5 @@ namespace Ryujinx.HLE.HOS.Services.Bcat.ServiceCreator
       {
             return ResultCode.Success;
        }
+    }
+}
