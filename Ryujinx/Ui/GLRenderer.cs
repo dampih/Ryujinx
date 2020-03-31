@@ -197,7 +197,10 @@ namespace Ryujinx.Ui
                 string titleIdSection = string.IsNullOrWhiteSpace(_device.System.TitleIdText) ? string.Empty
                     : " | " + _device.System.TitleIdText.ToUpper();
 
-                parent.Title = $"Ryujinx {Program.Version}{titleNameSection}{titleIdSection}";
+                string titleVersionSection = string.IsNullOrWhiteSpace(_device.System.TitleVersionString) ? string.Empty
+                    : " | Title Version " + _device.System.TitleVersionString;
+
+                parent.Title = $"Ryujinx {Program.Version}{titleNameSection}{titleIdSection}{titleVersionSection}";
             });
 
             Thread renderLoopThread = new Thread(Render)
