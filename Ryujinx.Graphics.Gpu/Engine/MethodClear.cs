@@ -18,6 +18,10 @@ namespace Ryujinx.Graphics.Gpu.Engine
             {
                 UpdateScissorState(state);
             }
+            if (!GetRenderEnable(state))
+            {
+                return;
+            }
 
             UpdateRenderTargetState(state, useControl: false);
 
