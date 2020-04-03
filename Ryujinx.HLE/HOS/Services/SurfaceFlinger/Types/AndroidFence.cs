@@ -8,7 +8,7 @@ using System.Threading;
 namespace Ryujinx.HLE.HOS.Services.SurfaceFlinger
 {
     [StructLayout(LayoutKind.Sequential, Pack = 1, Size = 0x24)]
-    struct MultiFence
+    struct AndroidFence : IFlattenable
     {
         public int FenceCount;
 
@@ -16,21 +16,26 @@ namespace Ryujinx.HLE.HOS.Services.SurfaceFlinger
 
         private Span<byte> _storage => MemoryMarshal.CreateSpan(ref _fenceStorageStart, Unsafe.SizeOf<NvFence>() * 4);
 
-        private Span<NvFence> _nvFences => MemoryMarshal.Cast<byte, NvFence>(_storage);
+        public Span<NvFence> NvFences => MemoryMarshal.Cast<byte, NvFence>(_storage);
 
-        public static MultiFence NoFence
+        public static AndroidFence NoFence
         {
             get
             {
-                MultiFence fence = new MultiFence
+                AndroidFence fence = new AndroidFence
                 {
                     FenceCount = 0
                 };
 
-                fence._nvFences[0].Id = NvFence.InvalidSyncPointId;
+                fence.NvFences[0].Id = NvFence.InvalidSyncPointId;
 
                 return fence;
             }
+        }
+
+        public void AddFence(NvFence fence)
+        {
+            NvFences[FenceCount++] = fence;
         }
 
         public void WaitForever(GpuContext gpuContext)
@@ -42,8 +47,28 @@ namespace Ryujinx.HLE.HOS.Services.SurfaceFlinger
         {
             for (int i = 0; i < FenceCount; i++)
             {
-                _nvFences[i].Wait(gpuContext, timeout);
+                NvFences[i].Wait(gpuContext, timeout);
             }
+        }
+
+        public uint GetFlattenedSize()
+        {
+            return (uint)Unsafe.SizeOf<AndroidFence>();
+        }
+
+        public uint GetFdCount()
+        {
+            return 0;
+        }
+
+        public void Flattern(Parcel parcel)
+        {
+            parcel.WriteUnmanagedType(ref this);
+        }
+
+        public void Unflatten(Parcel parcel)
+        {
+            this = parcel.ReadUnmanagedType<AndroidFence>();
         }
     }
 }
