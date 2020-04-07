@@ -26,6 +26,7 @@ namespace Ryujinx.Graphics.Gpu.State
         Dispatch                        = 0xaf,
         SyncpointAction                 = 0xb2,
         CopyBuffer                      = 0xc0,
+        RasterizeEnable                 = 0xdf,
         CopyBufferParams                = 0x100,
         CopyBufferSwizzle               = 0x1c2,
         CopyBufferDstTexture            = 0x1c3,
