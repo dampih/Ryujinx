@@ -122,13 +122,14 @@ namespace ARMeilleure.Instructions
 
         private static void EmitReadInt(ArmEmitterContext context, Operand address, int rt, int size)
         {
-            Operand isUnalignedAddr = EmitAddressCheck(context, address, size);
+            //Operand isUnalignedAddr = EmitAddressCheck(context, address, size);
 
             Operand lblFastPath = Label();
             Operand lblSlowPath = Label();
             Operand lblEnd      = Label();
 
-            context.BranchIfFalse(lblFastPath, isUnalignedAddr);
+            context.Branch(lblFastPath);
+            //context.BranchIfFalse(lblFastPath, isUnalignedAddr);
 
             context.MarkLabel(lblSlowPath);
 
@@ -174,13 +175,14 @@ namespace ARMeilleure.Instructions
             int elem,
             int size)
         {
-            Operand isUnalignedAddr = EmitAddressCheck(context, address, size);
+            //Operand isUnalignedAddr = EmitAddressCheck(context, address, size);
 
             Operand lblFastPath = Label();
             Operand lblSlowPath = Label();
             Operand lblEnd      = Label();
 
-            context.BranchIfFalse(lblFastPath, isUnalignedAddr);
+            context.Branch(lblFastPath);
+            //context.BranchIfFalse(lblFastPath, isUnalignedAddr);
 
             context.MarkLabel(lblSlowPath);
 
@@ -229,13 +231,14 @@ namespace ARMeilleure.Instructions
 
         private static void EmitWriteInt(ArmEmitterContext context, Operand address, int rt, int size)
         {
-            Operand isUnalignedAddr = EmitAddressCheck(context, address, size);
+            //Operand isUnalignedAddr = EmitAddressCheck(context, address, size);
 
             Operand lblFastPath = Label();
             Operand lblSlowPath = Label();
             Operand lblEnd      = Label();
 
-            context.BranchIfFalse(lblFastPath, isUnalignedAddr);
+            context.Branch(lblFastPath);
+            //context.BranchIfFalse(lblFastPath, isUnalignedAddr);
 
             context.MarkLabel(lblSlowPath);
 
@@ -272,13 +275,14 @@ namespace ARMeilleure.Instructions
             int elem,
             int size)
         {
-            Operand isUnalignedAddr = EmitAddressCheck(context, address, size);
+            //Operand isUnalignedAddr = EmitAddressCheck(context, address, size);
 
             Operand lblFastPath = Label();
             Operand lblSlowPath = Label();
             Operand lblEnd      = Label();
 
-            context.BranchIfFalse(lblFastPath, isUnalignedAddr);
+            context.Branch(lblFastPath);
+            //context.BranchIfFalse(lblFastPath, isUnalignedAddr);
 
             context.MarkLabel(lblSlowPath);
 
@@ -370,7 +374,7 @@ namespace ARMeilleure.Instructions
                 pageOffset = context.ZeroExtend32(OperandType.I64, pageOffset);
             }
 
-            return context.Add(pte, pageOffset);
+            return context.Add(pte, context.Add(pageOffset, Const(context.Memory.WriteTrackOffset)));
         }
 
         private static void EmitReadIntFallback(ArmEmitterContext context, Operand address, int rt, int size)
