@@ -395,7 +395,7 @@ namespace Ryujinx.Graphics.Shader.CodeGen.Glsl
 
         private static void DeclareUsedOutputAttributes(CodeGenContext context, StructuredProgramInfo info)
         {
-            foreach (int attr in info.OAttributes.OrderBy(x => x))
+            for (int attr = 0; attr < 8; attr++)
             {
                 context.AppendLine($"layout (location = {attr}) out vec4 {DefaultNames.OAttributePrefix}{attr};");
             }
