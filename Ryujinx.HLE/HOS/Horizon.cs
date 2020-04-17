@@ -66,6 +66,8 @@ namespace Ryujinx.HLE.HOS
 
         internal Switch Device { get; private set; }
 
+        internal SurfaceFlinger SurfaceFlinger { get; private set; }
+
         public SystemStateMgr State { get; private set; }
 
         internal bool KernelInitialized { get; private set; }
@@ -266,6 +268,8 @@ namespace Ryujinx.HLE.HOS
             DatabaseImpl.Instance.InitializeDatabase(device);
 
             HostSyncpoint = new NvHostSyncpt(device);
+
+            SurfaceFlinger = new SurfaceFlinger(device);
         }
 
         public void LoadCart(string exeFsDir, string romFsFile = null)
@@ -847,6 +851,8 @@ namespace Ryujinx.HLE.HOS
             if (!_isDisposed && disposing)
             {
                 _isDisposed = true;
+
+                SurfaceFlinger.Dispose();
 
                 KProcess terminationProcess = new KProcess(this);
 
