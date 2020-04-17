@@ -878,10 +878,10 @@ namespace Ryujinx.HLE.HOS
                 terminationThread.Start();
 
                 // Signal the vsync event to avoid issues of KThread waiting on it.
-                if (Device.EnableDeviceVsync)
-                {
-                    Device.VsyncEvent.Set();
-                }
+                //if (Device.EnableDeviceVsync)
+               // {
+                //    Device.VsyncEvent.Set();
+               // }
 
                 // Destroy nvservices channels as KThread could be waiting on some user events.
                 // This is safe as KThread that are likely to call ioctls are going to be terminated by the post handler hook on the SVC facade.
