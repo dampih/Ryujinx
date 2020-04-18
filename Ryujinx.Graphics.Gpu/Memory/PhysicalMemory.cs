@@ -1,6 +1,5 @@
-using ARMeilleure.Memory.Tracking;
+using Ryujinx.Cpu.Tracking;
 using System;
-using System.Runtime.CompilerServices;
 
 namespace Ryujinx.Graphics.Gpu.Memory
 {
@@ -45,28 +44,14 @@ namespace Ryujinx.Graphics.Gpu.Memory
         }
 
         /// <summary>
-        /// Checks if a specified virtual memory region has been modified by the CPU since the last call.
-        /// </summary>
-        /// <param name="address">CPU virtual address of the region</param>
-        /// <param name="size">Size of the region</param>
-        /// <param name="name">Resource name</param>
-        /// <param name="modifiedRanges">Optional array where the modified ranges should be written</param>
-        /// <returns>The number of modified ranges</returns>
-        [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public int QueryModified(ulong address, ulong size, ResourceName name, (ulong, ulong)[] modifiedRanges = null)
-        {
-            return _cpuMemory.QueryModified(address, size, (int)name, modifiedRanges);
-        }
-
-        /// <summary>
         /// Obtains a memory tracking handle for the given virtual region. This should be disposed when finished with.
         /// </summary>
         /// <param name="address">CPU virtual address of the region</param>
         /// <param name="size">Size of the region</param>
         /// <returns>The memory tracking handle</returns>
-        public RegionHandle BeginTracking(ulong address, ulong size)
+        public CpuRegionHandle BeginTracking(ulong address, ulong size)
         {
-            return _cpuMemory.Tracking.BeginTracking(address, size);
+            return _cpuMemory.BeginTracking(address, size);
         }
 
         /// <summary>
@@ -76,9 +61,9 @@ namespace Ryujinx.Graphics.Gpu.Memory
         /// <param name="size">Size of the region</param>
         /// <param name="granularity">Desired granularity of write tracking</param>
         /// <returns>The memory tracking handles</returns>
-        public MultiRegionHandle BeginGranularTracking(ulong address, ulong size, ulong granularity)
+        public CpuMultiRegionHandle BeginGranularTracking(ulong address, ulong size, ulong granularity)
         {
-            return _cpuMemory.Tracking.BeginGranularTracking(address, size, granularity);
+            return _cpuMemory.BeginGranularTracking(address, size, granularity);
         }
     }
 }
