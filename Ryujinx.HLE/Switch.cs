@@ -61,7 +61,6 @@ namespace Ryujinx.HLE
             Hid = new Hid(this, System.HidBaseAddress);
             Hid.InitDevices();
 
-            VsyncEvent = new AutoResetEvent(true);
         }
 
         public void Initialize()
@@ -156,7 +155,6 @@ namespace Ryujinx.HLE
             if (disposing)
             {
                 System.Dispose();
-                VsyncEvent.Dispose();
                 AudioOut.Dispose();
             }
         }
