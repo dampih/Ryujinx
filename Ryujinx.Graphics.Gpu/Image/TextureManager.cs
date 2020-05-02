@@ -308,7 +308,7 @@ namespace Ryujinx.Graphics.Gpu.Image
                 Target.Texture2D,
                 formatInfo);
 
-            Texture texture = FindOrCreateTexture(info, TextureSearchFlags.IgnoreMs);
+            Texture texture = FindOrCreateTexture(info, TextureSearchFlags.ForCopy);
 
             texture.SynchronizeMemory();
 
@@ -455,7 +455,7 @@ namespace Ryujinx.Graphics.Gpu.Image
         /// <returns>The texture</returns>
         public Texture FindOrCreateTexture(TextureInfo info, TextureSearchFlags flags = TextureSearchFlags.None)
         {
-            bool isSamplerTexture = (flags & TextureSearchFlags.Sampler) != 0;
+            bool isSamplerTexture = (flags & TextureSearchFlags.ForSampler) != 0;
 
             // Try to find a perfect texture match, with the same address and parameters.
             int sameAddressOverlapsCount = _textures.FindOverlaps(info.Address, ref _textureOverlaps);
