@@ -42,6 +42,8 @@ namespace Ryujinx.HLE.HOS.Services.Audio.AudioRendererManager
 
         private ulong _elapsedFrameCount;
 
+        public VoiceChannelResourceIn[] _channelState;
+
         public IAudioRenderer(
             Horizon                system,
             MemoryManager          memory,
@@ -175,7 +177,7 @@ namespace Ryujinx.HLE.HOS.Services.Audio.AudioRendererManager
                 }
             }
 
-            reader.Read<VoiceChannelResourceIn>(inputHeader.VoiceResourceSize);
+            _channelState = reader.Read<VoiceChannelResourceIn>(inputHeader.VoiceResourceSize);
 
             VoiceIn[] voicesIn = reader.Read<VoiceIn>(inputHeader.VoiceSize);
 
@@ -191,6 +193,7 @@ namespace Ryujinx.HLE.HOS.Services.Audio.AudioRendererManager
                 {
                     continue;
                 }
+                voiceCtx.VoiceSlot = voice.VoiceSlot;
 
                 if (voice.FirstUpdate != 0)
                 {
@@ -378,7 +381,22 @@ namespace Ryujinx.HLE.HOS.Services.Audio.AudioRendererManager
 
                     for (int offset = 0; offset < samples.Length; offset++)
                     {
-                        mixBuffer[outOffset++] += (int)(samples[offset] * voice.Volume);
+                        float sampleL = samples[offset] * voice.Volume;
+                        float sampleR = samples[offset] * voice.Volume;
+                        if (_channelState[voice.VoiceSlot].is_used)
+                        {
+                            sampleL *= _channelState[voice.VoiceSlot].mix_volume.vol1;
+                            sampleR *= _channelState[voice.VoiceSlot].mix_volume.vol2;
+                        }
+
+                        if (outOffset % 2 == 0 || voice.ChannelsCount == 1)
+                        {
+                            mixBuffer[outOffset++] += (int)sampleL;
+                        }
+                        else
+                        {
+                            mixBuffer[outOffset++] += (int)sampleR;
+                        }
                     }
                 }
             }
