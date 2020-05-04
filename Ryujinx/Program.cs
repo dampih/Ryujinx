@@ -1,3 +1,4 @@
+using ARMeilleure.Translation.PTC;
 using Gtk;
 using Ryujinx.Common.Logging;
 using Ryujinx.Common.SystemInfo;
@@ -112,6 +113,9 @@ namespace Ryujinx
 
             if (e.IsTerminating)
             {
+                Ptc.Close();
+                PtcProfiler.Stop();
+
                 Logger.Shutdown();
             }
         }

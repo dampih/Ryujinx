@@ -76,6 +76,8 @@ namespace Ryujinx.HLE
                 System.EnableMultiCoreScheduling();
             }
 
+            System.EnablePtc = ConfigurationState.Instance.System.EnablePtc;
+
             System.FsIntegrityCheckLevel = GetIntigrityCheckLevel();
 
             System.GlobalAccessLogMode = ConfigurationState.Instance.System.FsGlobalAccessLogMode;

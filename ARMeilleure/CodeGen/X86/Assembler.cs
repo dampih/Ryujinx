@@ -1,4 +1,5 @@
 using ARMeilleure.IntermediateRepresentation;
+using ARMeilleure.Translation.PTC;
 using System;
 using System.Diagnostics;
 using System.IO;
@@ -63,6 +64,8 @@ namespace ARMeilleure.CodeGen.X86
         private static InstructionInfo[] _instTable;
 
         private Stream _stream;
+
+        private PtcInfo _ptcInfo;
 
         static Assembler()
         {
@@ -272,9 +275,10 @@ namespace ARMeilleure.CodeGen.X86
             _instTable[(int)inst] = info;
         }
 
-        public Assembler(Stream stream)
+        public Assembler(Stream stream, PtcInfo ptcInfo = null)
         {
-            _stream = stream;
+            _stream  = stream;
+            _ptcInfo = ptcInfo;
         }
 
         public void Add(Operand dest, Operand source, OperandType type)
@@ -455,13 +459,7 @@ namespace ARMeilleure.CodeGen.X86
 
         public void Jcc(X86Condition condition, long offset)
         {
-            if (ConstFitsOnS8(offset))
-            {
-                WriteByte((byte)(0x70 | (int)condition));
-
-                WriteByte((byte)offset);
-            }
-            else if (ConstFitsOnS32(offset))
+            if (ConstFitsOnS32(offset))
             {
                 WriteByte(0x0f);
                 WriteByte((byte)(0x80 | (int)condition));
@@ -476,13 +474,7 @@ namespace ARMeilleure.CodeGen.X86
 
         public void Jmp(long offset)
         {
-            if (ConstFitsOnS8(offset))
-            {
-                WriteByte(0xeb);
-
-                WriteByte((byte)offset);
-            }
-            else if (ConstFitsOnS32(offset))
+            if (ConstFitsOnS32(offset))
             {
                 WriteByte(0xe9);
 
@@ -907,6 +899,8 @@ namespace ARMeilleure.CodeGen.X86
                     }
                     else if (dest != null && dest.Kind == OperandKind.Register && info.OpRImm64 != BadOp)
                     {
+                        int? index = source.PtcIndex;
+
                         int rexPrefix = GetRexPrefix(dest, source, type, rrm: false);
 
                         if (rexPrefix != 0)
@@ -915,6 +909,11 @@ namespace ARMeilleure.CodeGen.X86
                         }
 
                         WriteByte((byte)(info.OpRImm64 + (dest.GetRegister().Index & 0b111)));
+
+                        if (_ptcInfo != null && index != null)
+                        {
+                            _ptcInfo.WriteRelocEntry(new RelocEntry((int)_stream.Position, (int)index));
+                        }
 
                         WriteUInt64(imm);
                     }
@@ -1310,11 +1309,7 @@ namespace ARMeilleure.CodeGen.X86
 
         public static int GetJccLength(long offset)
         {
-            if (ConstFitsOnS8(offset < 0 ? offset - 2 : offset))
-            {
-                return 2;
-            }
-            else if (ConstFitsOnS32(offset < 0 ? offset - 6 : offset))
+            if (ConstFitsOnS32(offset < 0 ? offset - 6 : offset))
             {
                 return 6;
             }
@@ -1326,11 +1321,7 @@ namespace ARMeilleure.CodeGen.X86
 
         public static int GetJmpLength(long offset)
         {
-            if (ConstFitsOnS8(offset < 0 ? offset - 2 : offset))
-            {
-                return 2;
-            }
-            else if (ConstFitsOnS32(offset < 0 ? offset - 5 : offset))
+            if (ConstFitsOnS32(offset < 0 ? offset - 5 : offset))
             {
                 return 5;
             }

@@ -1,3 +1,4 @@
+using ARMeilleure.Translation.PTC;
 using LibHac;
 using LibHac.Account;
 using LibHac.Bcat;
@@ -83,13 +84,14 @@ namespace Ryujinx.HLE.HOS
         public BlitStruct<ApplicationControlProperty> ControlData { get; set; }
 
         public string TitleName { get; private set; }
+        public string DisplayVersion { get; private set; }
 
         public ulong  TitleId { get; private set; }
         public string TitleIdText => TitleId.ToString("x16");
 
-        public string TitleVersionString { get; private set; }
-
         public bool TitleIs64Bit { get; private set; }
+
+        public bool EnablePtc { get; set; }
 
         public IntegrityCheckLevel FsIntegrityCheckLevel { get; set; }
 
@@ -278,7 +280,7 @@ namespace Ryujinx.HLE.HOS
             }
         }
 
-        private (Nca Main, Nca patch, Nca Control) GetXciGameData(Xci xci)
+        private (Nca main, Nca patch, Nca control) GetXciGameData(Xci xci)
         {
             if (!xci.HasPartition(XciPartitionType.Secure))
             {
@@ -370,7 +372,7 @@ namespace Ryujinx.HLE.HOS
                             .FirstOrDefault(x => x.Name[0] != 0).Name.ToString();
                     }
 
-                    TitleVersionString = ControlData.Value.DisplayVersion.ToString();
+                    DisplayVersion = ControlData.Value.DisplayVersion.ToString();
                 }
             }
             else
@@ -545,11 +547,6 @@ namespace Ryujinx.HLE.HOS
                 Device.FileSystem.SetRomFs(dataStorage.AsStream(FileAccess.Read));
             }
 
-            LoadExeFs(codeFs, out Npdm metaData);
-            
-            TitleId      = metaData.Aci0.TitleId;
-            TitleIs64Bit = metaData.Is64Bit;
-
             if (controlNca != null)
             {
                 ReadControlData(controlNca);
@@ -559,12 +556,14 @@ namespace Ryujinx.HLE.HOS
                 ControlData.ByteSpan.Clear();
             }
 
+            LoadExeFs(codeFs, out _);
+
             if (TitleId != 0)
             {
                 EnsureSaveData(new TitleId(TitleId));
             }
 
-            Logger.PrintInfo(LogClass.Loader, $"Application Loaded: {TitleName} v{TitleVersionString} [{TitleIdText}] [{(TitleIs64Bit ? "64-bit" : "32-bit")}]");
+            Logger.PrintInfo(LogClass.Loader, $"Application Loaded: {TitleName} v{DisplayVersion} [{TitleIdText}] [{(TitleIs64Bit ? "64-bit" : "32-bit")}]");
         }
 
         private void LoadExeFs(IFileSystem codeFs, out Npdm metaData)
@@ -612,6 +611,10 @@ namespace Ryujinx.HLE.HOS
             LoadNso("sdk");
 
             ContentManager.LoadEntries(Device);
+
+            Logger.PrintInfo(LogClass.Cpu, $"Initializing Persistent Translation Cache (enabled: {EnablePtc}).");
+
+            Ptc.Initialize(TitleIdText, DisplayVersion, EnablePtc);
 
             ProgramLoader.LoadNsos(KernelContext, metaData, staticObjects.ToArray());
         }
