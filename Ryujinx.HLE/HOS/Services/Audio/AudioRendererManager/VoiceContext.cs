@@ -106,14 +106,17 @@ namespace Ryujinx.HLE.HOS.Services.Audio.AudioRendererManager
             {
                 _offset = 0;
 
-                if (wb.Looping == 0)
+                if (wb.Looping == 0 && wb.Size != 0)
                 {
                     SetBufferIndex(_bufferIndex + 1);
                 }
 
-                _outStatus.PlayedWaveBuffersCount++;
+                if (wb.Size != 0)
+                {
+                    _outStatus.PlayedWaveBuffersCount++;
+                }
 
-                if (wb.LastBuffer != 0)
+                if (wb.LastBuffer != 0 || wb.Size == 0)
                 {
                     PlayState = PlayState.Paused;
                 }
