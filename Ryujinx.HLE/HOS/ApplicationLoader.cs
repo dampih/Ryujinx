@@ -111,6 +111,8 @@ namespace Ryujinx.HLE.HOS
 
             Xci xci = new Xci(_fileSystem.KeySet, file.AsStorage());
 
+            _contentManager.SetGameCard(file.AsStorage());
+
             if (!xci.HasPartition(XciPartitionType.Secure))
             {
                 Logger.PrintError(LogClass.Loader, "Unable to load XCI: Could not find XCI secure partition");
@@ -143,6 +145,8 @@ namespace Ryujinx.HLE.HOS
             }
 
             _contentManager.LoadEntries(_device);
+
+            _contentManager.AddAocData(securePartition, mainNca.Header.TitleId, ContentPath.GamecardContents);
 
             LoadNca(mainNca, patchNca, controlNca);
         }
