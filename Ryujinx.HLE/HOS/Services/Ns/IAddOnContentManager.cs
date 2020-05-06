@@ -73,12 +73,12 @@ namespace Ryujinx.HLE.HOS.Services.Ns
 
             ulong aocBaseId = GetAddOnContentBaseIdImpl(context);
 
-            for (int i = (int)startIndex; i < aocCount; ++i)
+            for (int i = 0; i < aocCount; ++i)
             {
-                context.Memory.Write(bufAddr + (ulong)i * 4, (int)(aocTitleIds[i] - aocBaseId));
+                context.Memory.Write(bufAddr + (ulong)i * 4, (int)(aocTitleIds[i + (int)startIndex] - aocBaseId));
             }
 
-            Logger.PrintDebug(LogClass.ServiceNs, $"pid={pid} start={startIndex} bufferSize={bufferSize} aocCount={aocCount}");
+            Logger.PrintDebug(LogClass.ServiceNs, $"pid={pid} bufferSize={bufferSize} start={startIndex} aocCount={aocCount}");
 
             return ResultCode.Success;
         }
@@ -95,7 +95,7 @@ namespace Ryujinx.HLE.HOS.Services.Ns
 
             context.ResponseData.Write(aocBaseId);
 
-            Logger.PrintDebug(LogClass.ServiceNs, $" pid={pid} aocBaseId={aocBaseId}");
+            Logger.PrintDebug(LogClass.ServiceNs, $"pid={pid} aocBaseId=0{aocBaseId:x}");
 
             // ResultCode will be error code of GetApplicationLaunchProperty if it fails
             return ResultCode.Success;
