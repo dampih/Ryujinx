@@ -256,7 +256,7 @@ namespace Ryujinx.HLE.HOS
 
             Xci xci = new Xci(KeySet, file.AsStorage());
 
-            ContentManager.SetGameCard(xci);
+            ContentManager.SetGameCard(file.AsStorage());
 
             (Nca mainNca, Nca patchNca, Nca controlNca) = GetXciGameData(xci);
 

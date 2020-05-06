@@ -28,8 +28,6 @@ namespace Ryujinx.HLE.FileSystem
         public EmulatedGameCard GameCard { get; private set; }
         public EmulatedSdCard   SdCard   { get; private set; }
 
-        public Xci RealGameCard {get; set;} = null;
-
         private VirtualFileSystem()
         {
             Reload();

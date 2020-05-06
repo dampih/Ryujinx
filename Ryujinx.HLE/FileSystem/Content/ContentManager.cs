@@ -1,6 +1,7 @@
 using LibHac;
 using LibHac.Common;
 using LibHac.Fs;
+using LibHac.FsService.Creators;
 using LibHac.FsSystem;
 using LibHac.FsSystem.NcaUtils;
 using LibHac.Ncm;
@@ -189,9 +190,9 @@ namespace Ryujinx.HLE.FileSystem.Content
             }
         }
 
-        public void SetGameCard(Xci xci)
+        public void SetGameCard(IStorage xciStorage)
         {
-            _virtualFileSystem.RealGameCard = xci;
+            _virtualFileSystem.GameCard.InsertGameCard(xciStorage);
         }
 
         public void AddAocData(IFileSystem fs, ulong titleId, string contentPath)
@@ -239,7 +240,13 @@ namespace Ryujinx.HLE.FileSystem.Content
 
             string ncaPath = contentPath.Split(':')[1].Substring(1);
 
-            _virtualFileSystem.RealGameCard.OpenPartition(XciPartitionType.Secure).OpenFile(out LibHac.Fs.IFile ncaFile, ncaPath.ToU8Span(), OpenMode.Read);
+            new EmulatedGameCardStorageCreator(_virtualFileSystem.GameCard)
+                .CreateSecure(_virtualFileSystem.GameCard.GetGameCardHandle(), out IStorage secureStorage)
+                .ThrowIfFailure();
+
+            XciPartition securePartition = new XciPartition(secureStorage);
+            
+            securePartition.OpenFile(out LibHac.Fs.IFile ncaFile, ncaPath.ToU8Span(), OpenMode.Read);
 
             var nca = new Nca(_virtualFileSystem.KeySet, ncaFile.AsStorage());
 
@@ -357,8 +364,8 @@ namespace Ryujinx.HLE.FileSystem.Content
 
             if (locationEntry.ContentPath.StartsWith(ContentPath.GamecardContents))
             {
-                // TODO: More checks?
-                return _virtualFileSystem.RealGameCard != null;
+                return _virtualFileSystem.GameCard.IsGameCardInserted() && 
+                       GetGameCardNca(locationEntry.ContentPath).Header.ContentType == contentType;
             }
             
             string installedPath = _virtualFileSystem.SwitchPathToSystemPath(locationEntry.ContentPath);
