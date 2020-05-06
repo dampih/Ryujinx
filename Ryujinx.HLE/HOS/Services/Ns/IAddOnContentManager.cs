@@ -166,8 +166,10 @@ namespace Ryujinx.HLE.HOS.Services.Ns
         // CreateEcPurchasedEventManager() -> object<nn::ec::IPurchaseEventManager>
         public static ResultCode CreateEcPurchasedEventManager(ServiceCtx context)
         {
-            // TODO: Implement IPurchaseEventManager? Needed?
+            MakeObject(context, new IPurchaseEventManager());
+
             Logger.PrintStub(LogClass.ServiceNs);
+
             return ResultCode.Success;
         }
 
@@ -175,8 +177,12 @@ namespace Ryujinx.HLE.HOS.Services.Ns
         // CreatePermanentEcPurchasedEventManager() -> object<nn::ec::IPurchaseEventManager>
         public static ResultCode CreatePermanentEcPurchasedEventManager(ServiceCtx context)
         {
-            // TODO: Implement IPurchaseEventManager? Needed?
+            // Very similar to CreateEcPurchasedEventManager but with some extra code
+
+            MakeObject(context, new IPurchaseEventManager());
+
             Logger.PrintStub(LogClass.ServiceNs);
+
             return ResultCode.Success;
         }
 
