@@ -28,6 +28,8 @@ namespace Ryujinx.HLE.FileSystem.Content
 
         private SortedDictionary<(ulong titleId, NcaContentType type), string> _contentDictionary;
 
+        private SortedList<ulong, string> _aocData { get; }
+
         private VirtualFileSystem _virtualFileSystem;
 
         private readonly object _lock = new object();
@@ -68,6 +70,8 @@ namespace Ryujinx.HLE.FileSystem.Content
             };
 
             _virtualFileSystem = virtualFileSystem;
+
+            _aocData = new SortedList<ulong, string>();
         }
 
         public void LoadEntries(Switch device = null)
@@ -168,12 +172,78 @@ namespace Ryujinx.HLE.FileSystem.Content
                     }
                 }
 
+                // AddOnContent locations
+                LinkedList<LocationEntry> aocList = new LinkedList<LocationEntry>();
+                foreach (var (titleId, contentPath) in _aocData)
+                {
+                    LocationEntry location = new LocationEntry(contentPath, 0, (long)titleId, NcaContentType.PublicData);
+                    aocList.AddLast(location);
+                }
+                _locationEntries.Add(StorageId.None, aocList);
+
                 if (device != null)
                 {
                     TimeManager.Instance.InitializeTimeZone(device);
                     device.System.Font.Initialize(this);
                 }
             }
+        }
+
+        public void SetGameCard(Xci xci)
+        {
+            _virtualFileSystem.RealGameCard = xci;
+        }
+
+        public void AddAocData(IFileSystem fs, ulong titleId, string contentPath)
+        {
+            foreach (var ncaPath in fs.EnumerateEntries("*.cnmt.nca", SearchOptions.Default))
+            {
+                fs.OpenFile(out IFile ncaFile, ncaPath.FullPath.ToU8Span(), OpenMode.Read);
+                using (ncaFile)
+                {
+                    var nca = new Nca(_virtualFileSystem.KeySet, ncaFile.AsStorage());
+                    if (nca.Header.ContentType != NcaContentType.Meta)
+                    {
+                        continue; // Warning?
+                    }
+
+                    using var pfs0 = nca.OpenFileSystem(0, Switch.GetIntegrityCheckLevel());
+                    pfs0.OpenFile(out IFile cnmtFile, pfs0.EnumerateEntries().Single().FullPath.ToU8Span(), OpenMode.Read);
+                    using (cnmtFile)
+                    {
+                        var cnmt = new Cnmt(cnmtFile.AsStream());
+
+                        if (cnmt.Type != ContentMetaType.AddOnContent || (cnmt.TitleId & 0xFFFFFFFFFFFFE000) != titleId)
+                        {
+                            continue;
+                        }
+
+                        // TODO: Confirm if AOC can have multiple ContentEntries
+                        string ncaId = BitConverter.ToString(cnmt.ContentEntries[0].NcaId).Replace("-", "").ToLower();
+                        _aocData[cnmt.TitleId] = $"{contentPath}:/{ncaId}.nca";
+                    }
+                }
+            }
+        }
+
+        public int GetAocCount() => _aocData.Count;
+
+        public List<ulong> GetAocTitleIds() => _aocData.Keys.ToList();
+
+        public Nca GetGameCardNca(string contentPath)
+        {
+            if (!contentPath.StartsWith(ContentPath.GamecardContents))
+            {
+                return null;
+            }
+
+            string ncaPath = contentPath.Split(':')[1].Substring(1);
+
+            _virtualFileSystem.RealGameCard.OpenPartition(XciPartitionType.Secure).OpenFile(out LibHac.Fs.IFile ncaFile, ncaPath.ToU8Span(), OpenMode.Read);
+
+            var nca = new Nca(_virtualFileSystem.KeySet, ncaFile.AsStorage());
+
+            return nca;
         }
 
         public void ClearEntry(long titleId, NcaContentType contentType, StorageId storageId)
@@ -283,6 +353,12 @@ namespace Ryujinx.HLE.FileSystem.Content
             if (locationEntry.ContentPath == null)
             {
                 return false;
+            }
+
+            if (locationEntry.ContentPath.StartsWith(ContentPath.GamecardContents))
+            {
+                // TODO: More checks?
+                return _virtualFileSystem.RealGameCard != null;
             }
             
             string installedPath = _virtualFileSystem.SwitchPathToSystemPath(locationEntry.ContentPath);
@@ -580,7 +656,7 @@ namespace Ryujinx.HLE.FileSystem.Content
 
             SystemVersion VerifyAndGetVersionZip(ZipArchive archive)
             {
-                IntegrityCheckLevel integrityCheckLevel = Switch.GetIntigrityCheckLevel();
+                IntegrityCheckLevel integrityCheckLevel = Switch.GetIntegrityCheckLevel();
 
                 SystemVersion systemVersion = null;
 
@@ -743,7 +819,7 @@ namespace Ryujinx.HLE.FileSystem.Content
 
             SystemVersion VerifyAndGetVersion(IFileSystem filesystem)
             {
-                IntegrityCheckLevel integrityCheckLevel = Switch.GetIntigrityCheckLevel();
+                IntegrityCheckLevel integrityCheckLevel = Switch.GetIntegrityCheckLevel();
 
                 SystemVersion systemVersion = null;
 
@@ -874,7 +950,7 @@ namespace Ryujinx.HLE.FileSystem.Content
 
         public SystemVersion GetCurrentFirmwareVersion()
         {
-            IntegrityCheckLevel integrityCheckLevel = Switch.GetIntigrityCheckLevel();
+            IntegrityCheckLevel integrityCheckLevel = Switch.GetIntegrityCheckLevel();
 
             LoadEntries();
 

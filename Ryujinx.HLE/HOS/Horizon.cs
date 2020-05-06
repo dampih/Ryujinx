@@ -256,6 +256,8 @@ namespace Ryujinx.HLE.HOS
 
             Xci xci = new Xci(KeySet, file.AsStorage());
 
+            ContentManager.SetGameCard(xci);
+
             (Nca mainNca, Nca patchNca, Nca controlNca) = GetXciGameData(xci);
 
             if (mainNca == null)
@@ -345,6 +347,8 @@ namespace Ryujinx.HLE.HOS
             {
                 ControlData.ByteSpan.Clear();
             }
+
+            ContentManager.AddAocData(securePartition, mainNca.Header.TitleId, ContentPath.GamecardContents);
 
             return (mainNca, patchNca, controlNca);
         }
