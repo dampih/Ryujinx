@@ -755,6 +755,8 @@ namespace Ryujinx.Graphics.Shader.Instructions
             if (op.IsBindless)
             {
                 sourcesList.Add(Ra());
+
+                flags |= TextureFlags.Bindless;
             }
 
             SamplerType type = ConvertSamplerType(op.Dimensions);
@@ -957,6 +959,24 @@ namespace Ryujinx.Graphics.Shader.Instructions
 
             SamplerType type = ConvertSamplerType(op.Dimensions);
 
+            bool hasLod = op.LodMode > TextureLodMode.LodZero;
+
+            if (type == SamplerType.Texture1D && (flags & ~TextureFlags.Bindless) == TextureFlags.IntCoords && !(hasLod ||
+                op.HasDepthCompare ||
+                op.HasOffset ||
+                op.IsArray ||
+                op.IsMultisample))
+            {
+                // For bindless, we don't have any way to know the texture type,
+                // so we assume it's texture buffer when the sampler type is 1D, since that's more common.
+                bool isTypeBuffer = isBindless || context.Config.GpuAccessor.QueryIsTextureBuffer(op.Immediate);
+
+                if (isTypeBuffer)
+                {
+                    type = SamplerType.TextureBuffer;
+                }
+            }
+
             int coordsCount = type.GetDimensions();
 
             for (int index = 0; index < coordsCount; index++)
@@ -971,8 +991,6 @@ namespace Ryujinx.Graphics.Shader.Instructions
                 type |= SamplerType.Array;
             }
 
-            bool hasLod = op.LodMode > TextureLodMode.LodZero;
-
             Operand lodValue = hasLod ? Rb() : ConstF(0);
 
             Operand packedOffs = op.HasOffset ? Rb() : null;
@@ -986,7 +1004,7 @@ namespace Ryujinx.Graphics.Shader.Instructions
 
             if ((op.LodMode == TextureLodMode.LodZero  ||
                  op.LodMode == TextureLodMode.LodLevel ||
-                 op.LodMode == TextureLodMode.LodLevelA) && !op.IsMultisample)
+                 op.LodMode == TextureLodMode.LodLevelA) && !op.IsMultisample && type != SamplerType.TextureBuffer)
             {
                 sourcesList.Add(lodValue);
 
@@ -1016,16 +1034,6 @@ namespace Ryujinx.Graphics.Shader.Instructions
                 sourcesList.Add(Rb());
 
                 type |= SamplerType.Multisample;
-            }
-
-            if (type == SamplerType.Texture1D && flags == TextureFlags.IntCoords && !isBindless)
-            {
-                bool isTypeBuffer = context.Config.GpuAccessor.QueryIsTextureBuffer(op.Immediate);
-
-                if (isTypeBuffer)
-                {
-                    type = SamplerType.TextureBuffer;
-                }
             }
 
             Operand[] sources = sourcesList.ToArray();
