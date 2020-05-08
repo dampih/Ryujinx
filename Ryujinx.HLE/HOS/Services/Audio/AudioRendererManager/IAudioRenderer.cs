@@ -370,7 +370,7 @@ namespace Ryujinx.HLE.HOS.Services.Audio.AudioRendererManager
 
             foreach (VoiceContext voice in _voices)
             {
-                if (!voice.Playing || voice.CurrentWaveBuffer.Size == 0)
+                if (!voice.Playing)
                 {
                     continue;
                 }
