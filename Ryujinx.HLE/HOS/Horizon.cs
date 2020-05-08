@@ -30,6 +30,7 @@ using Ryujinx.HLE.HOS.Services.SurfaceFlinger;
 using Ryujinx.HLE.HOS.Services.Time.Clock;
 using Ryujinx.HLE.HOS.SystemState;
 using Ryujinx.HLE.Loaders.Executables;
+using Ryujinx.HLE.Loaders.ExePatchers;
 using Ryujinx.HLE.Loaders.Npdm;
 using Ryujinx.HLE.Utilities;
 using System;
@@ -587,6 +588,7 @@ namespace Ryujinx.HLE.HOS
             }
 
             List<IExecutable> staticObjects = new List<IExecutable>();
+            List<string> buildIds = new List<string>();
 
             void LoadNso(string filename)
             {
@@ -603,7 +605,10 @@ namespace Ryujinx.HLE.HOS
                          
                     NsoExecutable staticObject = new NsoExecutable(nsoFile.AsStorage());
 
+                    string buildId = BitConverter.ToString(staticObject.BuildId).Replace("-", "").TrimEnd('0');
+
                     staticObjects.Add(staticObject);
+                    buildIds.Add(buildId);
                 }
             }
 
@@ -617,7 +622,13 @@ namespace Ryujinx.HLE.HOS
 
             ContentManager.LoadEntries(Device);
 
-            ProgramLoader.LoadNsos(KernelContext, metaData, staticObjects.ToArray());
+            // TODO: Change path 
+            string patchesPath = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
+            patchesPath = Path.Combine(patchesPath, "Ryujinx", "nsopatches");
+
+            var patches = PatchUtils.CollectNsoPatches(patchesPath, buildIds);
+
+            ProgramLoader.LoadNsos(KernelContext, metaData, staticObjects.ToArray(), patches);
         }
 
         public void LoadProgram(string filePath)
