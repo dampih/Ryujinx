@@ -111,8 +111,6 @@ namespace Ryujinx.HLE.HOS
 
             Xci xci = new Xci(_fileSystem.KeySet, file.AsStorage());
 
-            _contentManager.SetGameCard(file.AsStorage());
-
             if (!xci.HasPartition(XciPartitionType.Secure))
             {
                 Logger.PrintError(LogClass.Loader, "Unable to load XCI: Could not find XCI secure partition");
@@ -146,16 +144,16 @@ namespace Ryujinx.HLE.HOS
 
             _contentManager.LoadEntries(_device);
 
-            _contentManager.AddAocData(securePartition, mainNca.Header.TitleId, ContentPath.GamecardContents);
+            _contentManager.AddAocData(securePartition, xciFile, mainNca.Header.TitleId);
 
             LoadNca(mainNca, patchNca, controlNca);
         }
 
-        public void LoadNsp(string nspFile)
+        public void LoadNsp(string nspPath)
         {
-            FileStream file = new FileStream(nspFile, FileMode.Open, FileAccess.Read);
+            FileStream nspFile = new FileStream(nspPath, FileMode.Open, FileAccess.Read);
 
-            PartitionFileSystem nsp = new PartitionFileSystem(file.AsStorage());
+            PartitionFileSystem pfs = new PartitionFileSystem(nspFile.AsStorage());
 
             Nca mainNca = null;
             Nca patchNca = null;
@@ -163,7 +161,7 @@ namespace Ryujinx.HLE.HOS
 
             try
             {
-                (mainNca, patchNca, controlNca) = GetGameData(nsp);
+                (mainNca, patchNca, controlNca) = GetGameData(pfs);
             }
             catch (Exception e)
             {
@@ -181,13 +179,15 @@ namespace Ryujinx.HLE.HOS
 
             if (mainNca != null)
             {
+                _contentManager.AddAocData(pfs, nspPath, mainNca.Header.TitleId);
+
                 LoadNca(mainNca, patchNca, controlNca);
 
                 return;
             }
 
             // This is not a normal NSP, it's actually a ExeFS as a NSP
-            LoadExeFs(nsp, out _);
+            LoadExeFs(pfs, out _);
         }
 
         public void LoadNca(string ncaFile)
