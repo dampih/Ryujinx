@@ -19,9 +19,9 @@ namespace Ryujinx.HLE.Loaders.Executables
 
         public new int[] Capabilities { get; }
 
-        public KipExecutable(IFile kipFile)
+        public KipExecutable(IStorage kipStorage)
         {
-            Initialize(kipFile);
+            Initialize(kipStorage);
 
             for (int i = 0; i < base.Capabilities.Length; ++i)
             {
