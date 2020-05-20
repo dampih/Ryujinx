@@ -22,28 +22,55 @@ namespace Ryujinx.HLE.HOS
         private const string RomfsDir = "romfs";
         private const string RomfsStorageFile = "romfs.storage";
         private const string ExefsDir = "exefs";
-        private const string ExefsPatchesDir = "exefs_patches";
+        private const string NsoPatchesDir = "exefs_patches";
         private const string NroPatchesDir = "nro_patches";
         private const string StubExtension = ".stub";
 
-        public struct ModEntry
+        public class ModEntry
         {
+            public readonly ulong TitleId;
             public readonly DirectoryInfo ModDir;
             public readonly DirectoryInfo Exefs;
             public readonly DirectoryInfo Romfs;
             public readonly FileInfo RomfsFile;
 
-            public bool Enabled;
+            private bool _enabled;
 
-            public ModEntry(DirectoryInfo modDir, bool enabled)
+            public ModEntry(DirectoryInfo modDir, bool enabled, ulong titleId = ulong.MaxValue)
             {
                 ModDir = modDir;
+                _enabled = enabled;
 
-                Exefs = new DirectoryInfo(Path.Combine(modDir.FullName, ExefsDir));
-                Romfs = new DirectoryInfo(Path.Combine(modDir.FullName, RomfsDir));
-                RomfsFile = new FileInfo(Path.Combine(modDir.FullName, RomfsStorageFile));
+                if (titleId == ulong.MaxValue) // Global mod
+                {
+                    Exefs = ModDir;
+                }
+                else // Title mod
+                {
+                    Exefs = new DirectoryInfo(Path.Combine(modDir.FullName, ExefsDir));
+                    Romfs = new DirectoryInfo(Path.Combine(modDir.FullName, RomfsDir));
+                    RomfsFile = new FileInfo(Path.Combine(modDir.FullName, RomfsStorageFile));
+                }
 
-                Enabled = enabled;
+                if (Empty)
+                {
+                    Logger.PrintWarning(LogClass.Application, $"{ModName} is empty");
+                }
+            }
+
+            // Useful when Init and processing are separated
+            public bool Recheck()
+            {
+                if (!_enabled)
+                {
+                    return false;
+                }
+
+                ModDir.Refresh();
+                Exefs.Refresh();
+                Romfs?.Refresh();
+                RomfsFile?.Refresh();
+                return ModDir.Exists;
             }
 
             public string ModName => ModDir.Name;
@@ -53,10 +80,10 @@ namespace Ryujinx.HLE.HOS
         }
 
         public List<string> ModRootDirs { get; private set; }
-        public Dictionary<ulong, List<ModEntry>> Mods { get; private set; }
 
-        private List<DirectoryInfo> _nsoPatches; // unconditional exefs mods
-        private List<DirectoryInfo> _nroPatches; // unconditional nro mods
+        public Dictionary<ulong, List<ModEntry>> TitleMods { get; private set; }
+        public List<ModEntry> GlobalNsoMods { get; private set; } // NsoPatchesDir
+        public List<ModEntry> GlobalNroMods { get; private set; } // NroPatchesDir
 
         public ModLoader(VirtualFileSystem vfs)
         {
@@ -68,9 +95,9 @@ namespace Ryujinx.HLE.HOS
 
         public void InitModsList()
         {
-            Mods = new Dictionary<ulong, List<ModEntry>>();
-            _nsoPatches = new List<DirectoryInfo>();
-            _nroPatches = new List<DirectoryInfo>();
+            TitleMods = new Dictionary<ulong, List<ModEntry>>();
+            GlobalNsoMods = new List<ModEntry>();
+            GlobalNroMods = new List<ModEntry>();
 
             // Duplicate mod name checking
             var modNames = new HashSet<string>();
@@ -93,21 +120,14 @@ namespace Ryujinx.HLE.HOS
                 {
                     switch (titleDir.Name)
                     {
-                        case ExefsPatchesDir:
-                            foreach (var modDir in titleDir.EnumerateDirectories())
-                            {
-                                _nsoPatches.Add(modDir);
-                                Logger.PrintInfo(LogClass.Application, $"Found exefs_patches Mod '{modDir.Name}'");
-
-                                ModNameCheck(modDir);
-                            }
-                            break;
-
+                        case NsoPatchesDir:
                         case NroPatchesDir:
                             foreach (var modDir in titleDir.EnumerateDirectories())
                             {
-                                _nroPatches.Add(modDir);
-                                Logger.PrintInfo(LogClass.Application, $"Found nro_patches Mod '{modDir.Name}'");
+                                var modEntry = new ModEntry(modDir, true);
+
+                                (titleDir.Name == NsoPatchesDir ? GlobalNsoMods : GlobalNroMods).Add(modEntry);
+                                Logger.PrintInfo(LogClass.Application, $"Found exefs_patches Mod '{modDir.Name}'");
 
                                 ModNameCheck(modDir);
                             }
@@ -118,25 +138,19 @@ namespace Ryujinx.HLE.HOS
                             {
                                 foreach (var modDir in titleDir.EnumerateDirectories())
                                 {
-                                    var modEntry = new ModEntry(modDir, true);
-
-                                    if (modEntry.Empty)
-                                    {
-                                        Logger.PrintWarning(LogClass.Application, $"{modEntry.ModName} is empty");
-                                        continue;
-                                    }
+                                    var modEntry = new ModEntry(modDir, true, titleId);
 
                                     Logger.PrintInfo(LogClass.Application, $"Found Mod [{titleId:X16}] {modEntry}");
 
                                     ModNameCheck(modDir);
 
-                                    if (Mods.TryGetValue(titleId, out List<ModEntry> modEntries))
+                                    if (TitleMods.TryGetValue(titleId, out List<ModEntry> modEntries))
                                     {
                                         modEntries.Add(modEntry);
                                     }
                                     else
                                     {
-                                        Mods.Add(titleId, new List<ModEntry> { modEntry });
+                                        TitleMods.Add(titleId, new List<ModEntry> { modEntry });
                                     }
                                 }
                             }
@@ -148,9 +162,9 @@ namespace Ryujinx.HLE.HOS
 
         internal IStorage ApplyRomFsMods(ulong titleId, IStorage baseStorage)
         {
-            if (Mods.TryGetValue(titleId, out var titleMods))
+            if (TitleMods.TryGetValue(titleId, out var titleMods))
             {
-                var enabledMods = titleMods.Where(mod => mod.Enabled);
+                var enabledMods = titleMods.Where(mod => mod.Recheck());
 
                 var romfsContainers = enabledMods
                                       .Where(mod => mod.RomfsFile.Exists)
@@ -242,18 +256,18 @@ namespace Ryujinx.HLE.HOS
 
         internal void ApplyExefsReplacements(ulong titleId, List<NsoExecutable> nsos)
         {
-            if(nsos.Count > 32)
+            if (nsos.Count > 32)
             {
                 throw new ArgumentOutOfRangeException("NSO Count is more than 32");
             }
 
-            var exefsDirs = (Mods.TryGetValue(titleId, out var titleMods) ? titleMods : Enumerable.Empty<ModEntry>())
-                            .Where(mod => mod.Enabled && mod.Exefs.Exists)
+            var exefsDirs = (TitleMods.TryGetValue(titleId, out var titleMods) ? titleMods : Enumerable.Empty<ModEntry>())
+                            .Where(mod => mod.Recheck() && mod.Exefs.Exists)
                             .Select(mod => mod.Exefs);
 
             BitVector32 stubs = new BitVector32();
             BitVector32 repls = new BitVector32();
-            
+
             foreach (var exefsDir in exefsDirs)
             {
                 for (int i = 0; i < nsos.Count; ++i)
@@ -264,13 +278,13 @@ namespace Ryujinx.HLE.HOS
                     FileInfo nsoFile = new FileInfo(Path.Combine(exefsDir.FullName, nsoName));
                     if (nsoFile.Exists)
                     {
-                        if (repls[1<<i])
+                        if (repls[1 << i])
                         {
                             Logger.PrintWarning(LogClass.Loader, $"Multiple replacements to '{nsoName}'");
                             continue;
                         }
 
-                        repls[1<<i] = true;
+                        repls[1 << i] = true;
 
                         nsos[i] = new NsoExecutable(nsoFile.OpenRead().AsStorage(), nsoName);
                         Logger.PrintInfo(LogClass.Loader, $"NSO '{nsoName}' replaced");
@@ -278,13 +292,13 @@ namespace Ryujinx.HLE.HOS
                         continue;
                     }
 
-                    stubs[1<<i] |= File.Exists(Path.Combine(exefsDir.FullName, nsoName + StubExtension));
+                    stubs[1 << i] |= File.Exists(Path.Combine(exefsDir.FullName, nsoName + StubExtension));
                 }
             }
 
-            for (int i = nsos.Count-1; i >= 0; --i)
+            for (int i = nsos.Count - 1; i >= 0; --i)
             {
-                if (stubs[1<<i] && !repls[1<<i]) // Prioritizes replacements over stubs
+                if (stubs[1 << i] && !repls[1 << i]) // Prioritizes replacements over stubs
                 {
                     Logger.PrintInfo(LogClass.Loader, $"NSO '{nsos[i].Name}' stubbed");
                     nsos.RemoveAt(i);
@@ -294,19 +308,24 @@ namespace Ryujinx.HLE.HOS
 
         internal void ApplyNroPatches(NroExecutable nro)
         {
+            var nroPatches = GlobalNroMods.Where(mod => mod.Recheck() && mod.Exefs.Exists)
+                             .Select(mod => mod.Exefs);
+
             // NRO patches aren't offset relative to header unlike NSO
             // according to Atmosphere's ro patcher module
-            ApplyProgramPatches(_nroPatches, 0, nro);
+            ApplyProgramPatches(nroPatches, 0, nro);
         }
 
-        internal void ApplyProgramPatches(ulong titleId, int protectedOffset, params IExecutable[] programs)
+        internal void ApplyNsoPatches(ulong titleId, params IExecutable[] programs)
         {
-            var exefsDirs = (Mods.TryGetValue(titleId, out var titleMods) ? titleMods : Enumerable.Empty<ModEntry>())
-                            .Where(mod => mod.Enabled && mod.Exefs.Exists)
-                            .Select(mod => mod.Exefs)
-                            .Concat(_nsoPatches);
+            var exefsDirs = (TitleMods.TryGetValue(titleId, out var titleMods) ? titleMods : Enumerable.Empty<ModEntry>())
+                            .Concat(GlobalNsoMods)
+                            .Where(mod => mod.Recheck() && mod.Exefs.Exists)
+                            .Select(mod => mod.Exefs);
 
-            ApplyProgramPatches(exefsDirs, protectedOffset, programs);
+            // NSO patches are created with offset 0 according to Atmosphere's patcher module
+            // But `Program` doesn't contain the header which is 0x100 bytes. So, we adjust for that here
+            ApplyProgramPatches(exefsDirs, 0x100, programs);
         }
 
         private void ApplyProgramPatches(IEnumerable<DirectoryInfo> dirs, int protectedOffset, params IExecutable[] programs)

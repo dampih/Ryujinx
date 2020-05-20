@@ -30,8 +30,6 @@ namespace Ryujinx.HLE.HOS
         private readonly ContentManager _contentManager;
         private readonly VirtualFileSystem _fileSystem;
 
-        public IntegrityCheckLevel FsIntegrityCheckLevel => _device.System.FsIntegrityCheckLevel;
-
         public ulong TitleId { get; private set; }
         public string TitleIdText => TitleId.ToString("x16");
         public string TitleName { get; private set; }
@@ -41,6 +39,9 @@ namespace Ryujinx.HLE.HOS
         public bool TitleIs64Bit { get; private set; }
 
         public BlitStruct<ApplicationControlProperty> ControlData { get; set; }
+
+        // Binaries from exefs are loaded into mem in this order. Do not change.
+        private static readonly string[] ExeFsPrefixes = {"rtld", "main", "subsdk*", "sdk"};
 
         public ApplicationLoader(Switch device, VirtualFileSystem fileSystem, ContentManager contentManager)
         {
@@ -248,24 +249,24 @@ namespace Ryujinx.HLE.HOS
             {
                 if (mainNca.CanOpenSection(NcaSectionType.Data))
                 {
-                    dataStorage = mainNca.OpenStorage(NcaSectionType.Data, FsIntegrityCheckLevel);
+                    dataStorage = mainNca.OpenStorage(NcaSectionType.Data, _device.System.FsIntegrityCheckLevel);
                 }
 
                 if (mainNca.CanOpenSection(NcaSectionType.Code))
                 {
-                    codeFs = mainNca.OpenFileSystem(NcaSectionType.Code, FsIntegrityCheckLevel);
+                    codeFs = mainNca.OpenFileSystem(NcaSectionType.Code, _device.System.FsIntegrityCheckLevel);
                 }
             }
             else
             {
                 if (patchNca.CanOpenSection(NcaSectionType.Data))
                 {
-                    dataStorage = mainNca.OpenStorageWithPatch(patchNca, NcaSectionType.Data, FsIntegrityCheckLevel);
+                    dataStorage = mainNca.OpenStorageWithPatch(patchNca, NcaSectionType.Data, _device.System.FsIntegrityCheckLevel);
                 }
 
                 if (patchNca.CanOpenSection(NcaSectionType.Code))
                 {
-                    codeFs = mainNca.OpenFileSystemWithPatch(patchNca, NcaSectionType.Code, FsIntegrityCheckLevel);
+                    codeFs = mainNca.OpenFileSystemWithPatch(patchNca, NcaSectionType.Code, _device.System.FsIntegrityCheckLevel);
                 }
             }
 
@@ -332,7 +333,7 @@ namespace Ryujinx.HLE.HOS
 
         private void ReadControlData(Nca controlNca)
         {
-            IFileSystem controlFs = controlNca.OpenFileSystem(NcaSectionType.Data, FsIntegrityCheckLevel);
+            IFileSystem controlFs = controlNca.OpenFileSystem(NcaSectionType.Data, _device.System.FsIntegrityCheckLevel);
 
             Result result = controlFs.OpenFile(out IFile controlFile, "/control.nacp".ToU8Span(), OpenMode.Read);
 
@@ -366,9 +367,9 @@ namespace Ryujinx.HLE.HOS
 
             List<NsoExecutable> nsos = new List<NsoExecutable>();
 
-            void LoadNso(string filename)
+            foreach(string exePrefix in ExeFsPrefixes) // Load binaries with standard prefixes
             {
-                foreach (DirectoryEntryEx file in codeFs.EnumerateEntries("/", $"{filename}*"))
+                foreach (DirectoryEntryEx file in codeFs.EnumerateEntries("/", exePrefix))
                 {
                     if (Path.GetExtension(file.Name) != string.Empty)
                     {
@@ -385,19 +386,13 @@ namespace Ryujinx.HLE.HOS
                 }
             }
 
-            LoadNso("rtld");
-            LoadNso("main");
-            LoadNso("subsdk");
-            LoadNso("sdk");
-
             // ExeFs file replacements
             _fileSystem.ModLoader.ApplyExefsReplacements(TitleId, nsos);
 
             var programs = nsos.ToArray();
 
-            // Nso patches are created with offset 0 but the program doesn't contain
-            // the header which is 0x100 bytes. So, we adjust for that here
-            _fileSystem.ModLoader.ApplyProgramPatches(TitleId, 0x100, programs);
+
+            _fileSystem.ModLoader.ApplyNsoPatches(TitleId, programs);
 
             _contentManager.LoadEntries(_device);
 
