@@ -364,7 +364,7 @@ namespace Ryujinx.HLE.HOS
         {
             metaData ??= ReadNpdm(codeFs);
 
-            List<IExecutable> nsos = new List<IExecutable>();
+            List<NsoExecutable> nsos = new List<NsoExecutable>();
 
             void LoadNso(string filename)
             {
@@ -379,7 +379,7 @@ namespace Ryujinx.HLE.HOS
 
                     codeFs.OpenFile(out IFile nsoFile, file.FullPath.ToU8Span(), OpenMode.Read).ThrowIfFailure();
 
-                    NsoExecutable nso = new NsoExecutable(nsoFile.AsStorage());
+                    NsoExecutable nso = new NsoExecutable(nsoFile.AsStorage(), file.Name);
 
                     nsos.Add(nso);
                 }
@@ -389,6 +389,9 @@ namespace Ryujinx.HLE.HOS
             LoadNso("main");
             LoadNso("subsdk");
             LoadNso("sdk");
+
+            // ExeFs file replacements
+            _fileSystem.ModLoader.ApplyExefsReplacements(TitleId, nsos);
 
             var programs = nsos.ToArray();
 
@@ -485,7 +488,7 @@ namespace Ryujinx.HLE.HOS
             }
             else
             {
-                nro = new NsoExecutable(new LocalStorage(filePath, FileAccess.Read));
+                nro = new NsoExecutable(new LocalStorage(filePath, FileAccess.Read), Path.GetFileNameWithoutExtension(filePath));
             }
 
             _contentManager.LoadEntries(_device);

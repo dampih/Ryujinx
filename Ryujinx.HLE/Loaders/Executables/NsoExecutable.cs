@@ -17,13 +17,17 @@ namespace Ryujinx.HLE.Loaders.Executables
         public int BssOffset   => DataOffset + Data.Length;
         public new int BssSize => (int)base.BssSize;
 
-        public NsoExecutable(IStorage inStorage) : base(inStorage)
+        public string Name;
+
+        public NsoExecutable(IStorage inStorage, string name = null) : base(inStorage)
         {
             Program = new byte[Sections[2].MemoryOffset + Sections[2].DecompressedSize];
 
             Sections[0].DecompressSection().AsSpan().CopyTo(Text);
             Sections[1].DecompressSection().AsSpan().CopyTo(Ro);
             Sections[2].DecompressSection().AsSpan().CopyTo(Data);
+
+            Name = name;
         }
     }
 }

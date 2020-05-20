@@ -2,13 +2,13 @@ using LibHac.Common;
 using LibHac.Fs;
 using LibHac.FsSystem;
 using LibHac.FsSystem.RomFs;
-using LibHac.FsService;
 using Ryujinx.Common.Logging;
 using Ryujinx.HLE.FileSystem;
 using Ryujinx.HLE.Loaders.Mods;
 using Ryujinx.HLE.Loaders.Executables;
 using System;
 using System.Collections.Generic;
+using System.Collections.Specialized;
 using System.Linq;
 using System.IO;
 
@@ -24,6 +24,7 @@ namespace Ryujinx.HLE.HOS
         private const string ExefsDir = "exefs";
         private const string ExefsPatchesDir = "exefs_patches";
         private const string NroPatchesDir = "nro_patches";
+        private const string StubExtension = ".stub";
 
         public struct ModEntry
         {
@@ -53,6 +54,7 @@ namespace Ryujinx.HLE.HOS
 
         public List<string> ModRootDirs { get; private set; }
         public Dictionary<ulong, List<ModEntry>> Mods { get; private set; }
+
         private List<DirectoryInfo> _nsoPatches; // unconditional exefs mods
         private List<DirectoryInfo> _nroPatches; // unconditional nro mods
 
@@ -238,6 +240,57 @@ namespace Ryujinx.HLE.HOS
             return modCount;
         }
 
+        internal void ApplyExefsReplacements(ulong titleId, List<NsoExecutable> nsos)
+        {
+            if(nsos.Count > 32)
+            {
+                throw new ArgumentOutOfRangeException("NSO Count is more than 32");
+            }
+
+            var exefsDirs = (Mods.TryGetValue(titleId, out var titleMods) ? titleMods : Enumerable.Empty<ModEntry>())
+                            .Where(mod => mod.Enabled && mod.Exefs.Exists)
+                            .Select(mod => mod.Exefs);
+
+            BitVector32 stubs = new BitVector32();
+            BitVector32 repls = new BitVector32();
+            
+            foreach (var exefsDir in exefsDirs)
+            {
+                for (int i = 0; i < nsos.Count; ++i)
+                {
+                    var nso = nsos[i];
+                    var nsoName = nso.Name;
+
+                    FileInfo nsoFile = new FileInfo(Path.Combine(exefsDir.FullName, nsoName));
+                    if (nsoFile.Exists)
+                    {
+                        if (repls[1<<i])
+                        {
+                            Logger.PrintWarning(LogClass.Loader, $"Multiple replacements to '{nsoName}'");
+                            continue;
+                        }
+
+                        repls[1<<i] = true;
+
+                        nsos[i] = new NsoExecutable(nsoFile.OpenRead().AsStorage(), nsoName);
+                        Logger.PrintInfo(LogClass.Loader, $"NSO '{nsoName}' replaced");
+
+                        continue;
+                    }
+
+                    stubs[1<<i] |= File.Exists(Path.Combine(exefsDir.FullName, nsoName + StubExtension));
+                }
+            }
+
+            for (int i = nsos.Count-1; i >= 0; --i)
+            {
+                if (stubs[1<<i] && !repls[1<<i]) // Prioritizes replacements over stubs
+                {
+                    Logger.PrintInfo(LogClass.Loader, $"NSO '{nsos[i].Name}' stubbed");
+                    nsos.RemoveAt(i);
+                }
+            }
+        }
 
         internal void ApplyNroPatches(NroExecutable nro)
         {
@@ -276,6 +329,7 @@ namespace Ryujinx.HLE.HOS
 
             int GetIndex(string buildId) => buildIds.FindIndex(id => id == buildId); // O(n) but list is small
 
+            // Collect patches
             foreach (var patchDir in dirs)
             {
                 foreach (var patchFile in patchDir.EnumerateFiles())
@@ -324,6 +378,7 @@ namespace Ryujinx.HLE.HOS
                 }
             }
 
+            // Apply patches
             for (int i = 0; i < programs.Length; ++i)
             {
                 patches[i].Patch(programs[i].Program, protectedOffset);
