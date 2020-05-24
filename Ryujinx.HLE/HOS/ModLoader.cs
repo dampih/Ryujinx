@@ -16,235 +16,259 @@ namespace Ryujinx.HLE.HOS
 {
     public class ModLoader
     {
-        private readonly VirtualFileSystem _vfs;
-
-        private const string RootModsDir = "mods";
         private const string RomfsDir = "romfs";
         private const string RomfsStorageFile = "romfs.storage";
         private const string ExefsDir = "exefs";
-        private const string NsoPatchesDir = "exefs_patches";
-        private const string NroPatchesDir = "nro_patches";
         private const string StubExtension = ".stub";
 
-        public class ModEntry
+        private const string NsoPatchesDir = "exefs_patches";
+        private const string NroPatchesDir = "nro_patches";
+
+        public enum ModType
+        {
+            TitleMod,
+            NsoMod,
+            NroMod
+        }
+
+        public class Mod
         {
             public readonly ulong TitleId;
-            public readonly DirectoryInfo ModDir;
+            public readonly ModType Type;
+            public readonly DirectoryInfo Dir;
             public readonly DirectoryInfo Exefs;
             public readonly DirectoryInfo Romfs;
             public readonly FileInfo RomfsFile;
 
-            private bool _enabled;
+            public bool Enabled;
 
-            public ModEntry(DirectoryInfo modDir, bool enabled, ulong titleId = ulong.MaxValue)
+            public static Mod MakeMod(DirectoryInfo dir, ModType type, ulong titleId = ulong.MaxValue, bool enabled = true)
             {
-                ModDir = modDir;
-                _enabled = enabled;
-
-                if (titleId == ulong.MaxValue) // Global mod
+                if (type == ModType.TitleMod && titleId == ulong.MaxValue)
                 {
-                    Exefs = ModDir;
-                }
-                else // Title mod
-                {
-                    Exefs = new DirectoryInfo(Path.Combine(modDir.FullName, ExefsDir));
-                    Romfs = new DirectoryInfo(Path.Combine(modDir.FullName, RomfsDir));
-                    RomfsFile = new FileInfo(Path.Combine(modDir.FullName, RomfsStorageFile));
+                    Logger.PrintWarning(LogClass.Application, $"Orphaned {type} without TitleId '{dir.Name}'");
+                    return null;
                 }
 
-                if (Empty)
+                Mod m = new Mod(dir, type, titleId, enabled);
+
+                bool check = type == ModType.TitleMod ? m.Exefs.Exists || m.Romfs.Exists || m.RomfsFile.Exists : m.Exefs.Exists;
+
+                if (!check)
                 {
-                    Logger.PrintWarning(LogClass.Application, $"{ModName} is empty");
+                    Logger.PrintWarning(LogClass.Application, $"Invalid/Empty {type} '{m.Dir.Name}'");
+                    return null;
+                }
+
+                string status = (m.Exefs.Exists ? "[E" : "[") +
+                                ((m.RomfsFile?.Exists ?? false) ? "r" : "") +
+                                ((m.Romfs?.Exists ?? false) ? "R] " : "] ") +
+                                (type == ModType.TitleMod ? $"[{titleId:X16}]" : "");
+
+                Logger.PrintInfo(LogClass.Application, $"Found {type} '{m.Dir.Name}' {status}");
+
+                return m;
+            }
+
+            private Mod(DirectoryInfo dir, ModType type, ulong titleId, bool enabled = true)
+            {
+                Dir = dir;
+                Type = type;
+                Enabled = enabled;
+
+                switch (type)
+                {
+                    case ModType.NroMod:
+                    case ModType.NsoMod:
+                        Exefs = Dir; // No exefs needed for this type. Mods are directly under <mod-name>.
+                        break;
+                    default:
+                        TitleId = titleId;
+                        Exefs = new DirectoryInfo(Path.Combine(dir.FullName, ExefsDir));
+                        Romfs = new DirectoryInfo(Path.Combine(dir.FullName, RomfsDir));
+                        RomfsFile = new FileInfo(Path.Combine(dir.FullName, RomfsStorageFile));
+                        break;
                 }
             }
 
-            // Useful when Init and processing are separated
-            public bool Recheck()
+            // Useful when collect and processing are separated
+            public bool Check()
             {
-                if (!_enabled)
+                if (!Enabled)
                 {
                     return false;
                 }
 
-                ModDir.Refresh();
-                Exefs.Refresh();
-                Romfs?.Refresh();
-                RomfsFile?.Refresh();
-                return ModDir.Exists;
-            }
+                Dir.Refresh();
 
-            public string ModName => ModDir.Name;
-            public bool Empty => !(Exefs.Exists || RomfsFile.Exists || Romfs.Exists);
-
-            public override string ToString() => $"[{(Exefs.Exists ? "E" : "")}{(RomfsFile.Exists ? "r" : "")}{(Romfs.Exists ? "R" : "")}] '{ModName}'";
-        }
-
-        public List<string> ModRootDirs { get; private set; }
-
-        public Dictionary<ulong, List<ModEntry>> TitleMods { get; private set; }
-        public List<ModEntry> GlobalNsoMods { get; private set; } // NsoPatchesDir
-        public List<ModEntry> GlobalNroMods { get; private set; } // NroPatchesDir
-
-        public ModLoader(VirtualFileSystem vfs)
-        {
-            _vfs = vfs;
-
-            // By default, mods are collected from RyujinxBasePath/{RootModsDir}
-            ModRootDirs = new List<string> { Path.Combine(_vfs.GetBasePath(), RootModsDir) };
-        }
-
-        public void InitModsList()
-        {
-            TitleMods = new Dictionary<ulong, List<ModEntry>>();
-            GlobalNsoMods = new List<ModEntry>();
-            GlobalNroMods = new List<ModEntry>();
-
-            // Duplicate mod name checking
-            var modNames = new HashSet<string>();
-            void ModNameCheck(DirectoryInfo modDir)
-            {
-                if (!modNames.Add(modDir.Name))
+                if (Type == ModType.TitleMod)
                 {
-                    Logger.PrintWarning(LogClass.Application, $"Duplicate mod name '{modDir.Name}'");
+                    Exefs.Refresh();
+                    Romfs.Refresh();
+                    RomfsFile.Refresh();
                 }
+
+                return Dir.Exists;
+            }
+        }
+
+        public readonly Dictionary<ulong, List<Mod>> TitleMods;
+        public readonly Dictionary<string, Mod> NsoMods;
+        public readonly Dictionary<string, Mod> NroMods;
+
+        public ModLoader()
+        {
+            TitleMods = new Dictionary<ulong, List<Mod>>();
+            NsoMods = new Dictionary<string, Mod>();
+            NroMods = new Dictionary<string, Mod>();
+        }
+
+        public void Clear()
+        {
+            TitleMods.Clear();
+            NsoMods.Clear();
+            NroMods.Clear();
+        }
+
+        // Check if searchDir is NsoPatchesDir
+        // Check if searchDir is NroPatchesDir
+        // Check if searchDir is a TitleId
+        // Finally, check if searchDir is a RootDir of above
+        public void SearchMods(DirectoryInfo searchDir)
+        {
+            bool TrySearch(DirectoryInfo dir)
+            {
+                if (NsoPatchesDir.Equals(dir.Name, StringComparison.OrdinalIgnoreCase))
+                {
+                    AddPatchMods(dir, ModType.NsoMod);
+                }
+                else if (NroPatchesDir.Equals(dir.Name, StringComparison.OrdinalIgnoreCase))
+                {
+                    AddPatchMods(dir, ModType.NroMod);
+                }
+                else if (dir.Name.Length >= 16 && ulong.TryParse(dir.Name.Substring(0, 16), System.Globalization.NumberStyles.HexNumber, null, out ulong titleId))
+                {
+                    AddTitleMods(dir, titleId);
+                }
+                else
+                {
+                    return false;
+                }
+
+                return true;
             }
 
-            foreach (string modRootPath in ModRootDirs)
+            if (searchDir.Exists && !TrySearch(searchDir))
             {
-                var modRootDir = new DirectoryInfo(modRootPath);
-                if (!modRootDir.Exists) continue;
-
-                Logger.PrintDebug(LogClass.Application, $"Loading mods from `{modRootPath}`");
-
-                foreach (var titleDir in modRootDir.EnumerateDirectories())
+                foreach (var dir in searchDir.EnumerateDirectories())
                 {
-                    switch (titleDir.Name)
-                    {
-                        case NsoPatchesDir:
-                        case NroPatchesDir:
-                            foreach (var modDir in titleDir.EnumerateDirectories())
-                            {
-                                var modEntry = new ModEntry(modDir, true);
-
-                                (titleDir.Name == NsoPatchesDir ? GlobalNsoMods : GlobalNroMods).Add(modEntry);
-                                Logger.PrintInfo(LogClass.Application, $"Found exefs_patches Mod '{modDir.Name}'");
-
-                                ModNameCheck(modDir);
-                            }
-                            break;
-
-                        default:
-                            if (titleDir.Name.Length >= 16 && ulong.TryParse(titleDir.Name.Substring(0, 16), System.Globalization.NumberStyles.HexNumber, null, out ulong titleId))
-                            {
-                                foreach (var modDir in titleDir.EnumerateDirectories())
-                                {
-                                    var modEntry = new ModEntry(modDir, true, titleId);
-
-                                    Logger.PrintInfo(LogClass.Application, $"Found Mod [{titleId:X16}] {modEntry}");
-
-                                    ModNameCheck(modDir);
-
-                                    if (TitleMods.TryGetValue(titleId, out List<ModEntry> modEntries))
-                                    {
-                                        modEntries.Add(modEntry);
-                                    }
-                                    else
-                                    {
-                                        TitleMods.Add(titleId, new List<ModEntry> { modEntry });
-                                    }
-                                }
-                            }
-                            break;
-                    }
+                    TrySearch(dir);
                 }
             }
         }
 
+        public void AddTitleMods(DirectoryInfo modsDir, ulong titleId)
+        {
+            foreach (var modDir in modsDir.EnumerateDirectories())
+            {
+                var mod = Mod.MakeMod(modDir, ModType.TitleMod, titleId);
+                if (mod == null) continue;
+
+                if (TitleMods.TryGetValue(titleId, out var mods))
+                {
+                    mods.Add(mod);
+                }
+                else
+                {
+                    TitleMods[titleId] = new List<Mod> { mod };
+                }
+            }
+        }
+
+        public void AddPatchMods(DirectoryInfo patchesDir, ModType type)
+        {
+            foreach (var modDir in patchesDir.EnumerateDirectories())
+            {
+                var mod = Mod.MakeMod(modDir, type);
+                if (mod == null) continue;
+
+                (type == ModType.NroMod ? NroMods : NsoMods).TryAdd(modDir.Name, mod);
+            }
+        }
+
+        // Apply helpers
         internal IStorage ApplyRomFsMods(ulong titleId, IStorage baseStorage)
         {
-            if (TitleMods.TryGetValue(titleId, out var titleMods))
+            if (!TitleMods.TryGetValue(titleId, out var titleMods))
             {
-                var enabledMods = titleMods.Where(mod => mod.Recheck());
-
-                var romfsContainers = enabledMods
-                                      .Where(mod => mod.RomfsFile.Exists)
-                                      .Select(mod => mod.RomfsFile);
-
-                var romfsDirs = enabledMods
-                                .Where(mod => !mod.RomfsFile.Exists && mod.Romfs.Exists)
-                                .Select(mod => mod.Romfs);
-
-                var fileSet = new HashSet<string>();
-                var builder = new RomFsBuilder();
-
-                int appliedCount = 0;
-
-                Logger.PrintInfo(LogClass.Loader, "Collecting RomFs Containers...");
-                appliedCount += CollectRomFsMods(romfsContainers, fileSet, builder);
-
-                Logger.PrintInfo(LogClass.Loader, "Collecting RomFs Dirs...");
-                appliedCount += CollectRomFsMods(romfsDirs, fileSet, builder);
-
-                if (appliedCount == 0)
-                {
-                    Logger.PrintInfo(LogClass.Loader, "Using base RomFs");
-                    return baseStorage;
-                }
-
-                Logger.PrintInfo(LogClass.Loader, $"Found {fileSet.Count} modded files over {appliedCount} mods. Processing base storage...");
-                var baseRfs = new RomFsFileSystem(baseStorage);
-
-                foreach (var entry in baseRfs.EnumerateEntries()
-                                             .Where(f => f.Type == DirectoryEntryType.File && !fileSet.Contains(f.FullPath))
-                                             .OrderBy(f => f.FullPath, StringComparer.Ordinal))
-                {
-                    baseRfs.OpenFile(out IFile file, entry.FullPath.ToU8Span(), OpenMode.Read).ThrowIfFailure();
-                    builder.AddFile(entry.FullPath, file);
-                }
-
-                Logger.PrintInfo(LogClass.Loader, "Building new RomFs...");
-                IStorage newStorage = builder.Build();
-                Logger.PrintInfo(LogClass.Loader, "Using modded RomFs");
-
-                return newStorage;
+                return baseStorage;
             }
 
-            return baseStorage;
+            var fileSet = new HashSet<string>();
+            var builder = new RomFsBuilder();
+
+            Logger.PrintInfo(LogClass.Loader, "Collecting RomFS mods...");
+
+            int count = GatherRomFsMods(titleMods, fileSet, builder);
+            if (count == 0)
+            {
+                Logger.PrintInfo(LogClass.Loader, "Using base RomFS");
+                return baseStorage;
+            }
+
+            Logger.PrintInfo(LogClass.Loader, $"Found {fileSet.Count} modded files over {count} mods. Processing base storage...");
+
+            var baseRom = new RomFsFileSystem(baseStorage);
+            foreach (var entry in baseRom.EnumerateEntries()
+                                         .Where(f => f.Type == DirectoryEntryType.File && !fileSet.Contains(f.FullPath))
+                                         .OrderBy(f => f.FullPath, StringComparer.Ordinal))
+            {
+                baseRom.OpenFile(out IFile file, entry.FullPath.ToU8Span(), OpenMode.Read).ThrowIfFailure();
+                builder.AddFile(entry.FullPath, file);
+            }
+
+            Logger.PrintInfo(LogClass.Loader, "Building new RomFS...");
+            IStorage newStorage = builder.Build();
+            Logger.PrintInfo(LogClass.Loader, "Using modded RomFS");
+
+            return newStorage;
         }
 
-        private int CollectRomFsMods(IEnumerable<FileSystemInfo> fsEntries, HashSet<string> fileSet, RomFsBuilder builder)
+        private static int GatherRomFsMods(IEnumerable<Mod> titleMods, HashSet<string> fileSet, RomFsBuilder builder)
         {
-            static IFileSystem OpenFS(FileSystemInfo e) => e switch
-            {
-                DirectoryInfo romfsDir => new LocalFileSystem(romfsDir.FullName),
-                FileInfo romfsContainer => new RomFsFileSystem(romfsContainer.OpenRead().AsStorage()),
-                _ => null
-            };
-
-            static string GetModName(FileSystemInfo e) => e switch
-            {
-                DirectoryInfo romfsDir => romfsDir.Parent.Name,
-                FileInfo romfsContainer => romfsContainer.Directory.Name,
-                _ => null
-            };
-
             int modCount = 0;
 
-            foreach (var fsEntry in fsEntries)
+            foreach (var mod in titleMods.Where(mod => mod.Check())) // Filter enabled and existing
             {
-                using IFileSystem fs = OpenFS(fsEntry);
-                foreach (var entry in fs.EnumerateEntries()
-                                       .Where(f => f.Type == DirectoryEntryType.File)
-                                       .OrderBy(f => f.FullPath, StringComparer.Ordinal))
+                IFileSystem fs;
+                if (mod.RomfsFile.Exists) // Prioritize RomFS file
                 {
-                    fs.OpenFile(out IFile file, entry.FullPath.ToU8Span(), OpenMode.Read).ThrowIfFailure();
-                    if (fileSet.Add(entry.FullPath))
+                    fs = new RomFsFileSystem(mod.RomfsFile.OpenRead().AsStorage());
+                }
+                else if (mod.Romfs.Exists)
+                {
+                    fs = new LocalFileSystem(mod.Romfs.FullName);
+                }
+                else
+                {
+                    continue;
+                }
+
+                using (fs)
+                {
+                    foreach (var entry in fs.EnumerateEntries()
+                                        .Where(f => f.Type == DirectoryEntryType.File)
+                                        .OrderBy(f => f.FullPath, StringComparer.Ordinal))
                     {
-                        builder.AddFile(entry.FullPath, file);
-                    }
-                    else
-                    {
-                        Logger.PrintWarning(LogClass.Loader, $"    Skipped duplicate file '{entry.FullPath}' from '{GetModName(fsEntry)}'");
+                        fs.OpenFile(out IFile file, entry.FullPath.ToU8Span(), OpenMode.Read).ThrowIfFailure();
+                        if (fileSet.Add(entry.FullPath))
+                        {
+                            builder.AddFile(entry.FullPath, file);
+                        }
+                        else
+                        {
+                            Logger.PrintWarning(LogClass.Loader, $"    Skipped duplicate file '{entry.FullPath}' from '{mod.Dir.Name}'");
+                        }
                     }
                 }
 
@@ -256,13 +280,17 @@ namespace Ryujinx.HLE.HOS
 
         internal void ApplyExefsReplacements(ulong titleId, List<NsoExecutable> nsos)
         {
+            if (!TitleMods.TryGetValue(titleId, out var titleMods))
+            {
+                return;
+            }
+
             if (nsos.Count > 32)
             {
                 throw new ArgumentOutOfRangeException("NSO Count is more than 32");
             }
 
-            var exefsDirs = (TitleMods.TryGetValue(titleId, out var titleMods) ? titleMods : Enumerable.Empty<ModEntry>())
-                            .Where(mod => mod.Recheck() && mod.Exefs.Exists)
+            var exefsDirs = titleMods.Where(mod => mod.Check() && mod.Exefs.Exists)
                             .Select(mod => mod.Exefs);
 
             BitVector32 stubs = new BitVector32();
@@ -308,8 +336,7 @@ namespace Ryujinx.HLE.HOS
 
         internal void ApplyNroPatches(NroExecutable nro)
         {
-            var nroPatches = GlobalNroMods.Where(mod => mod.Recheck() && mod.Exefs.Exists)
-                             .Select(mod => mod.Exefs);
+            var nroPatches = NroMods.Values.Where(mod => mod.Check() && mod.Exefs.Exists);
 
             // NRO patches aren't offset relative to header unlike NSO
             // according to Atmosphere's ro patcher module
@@ -318,17 +345,16 @@ namespace Ryujinx.HLE.HOS
 
         internal void ApplyNsoPatches(ulong titleId, params IExecutable[] programs)
         {
-            var exefsDirs = (TitleMods.TryGetValue(titleId, out var titleMods) ? titleMods : Enumerable.Empty<ModEntry>())
-                            .Concat(GlobalNsoMods)
-                            .Where(mod => mod.Recheck() && mod.Exefs.Exists)
-                            .Select(mod => mod.Exefs);
+            var nsoMods = NsoMods.Values
+                          .Concat(TitleMods.TryGetValue(titleId, out var titleMods) ? titleMods : Enumerable.Empty<Mod>())
+                          .Where(mod => mod.Check() && mod.Exefs.Exists);
 
             // NSO patches are created with offset 0 according to Atmosphere's patcher module
             // But `Program` doesn't contain the header which is 0x100 bytes. So, we adjust for that here
-            ApplyProgramPatches(exefsDirs, 0x100, programs);
+            ApplyProgramPatches(nsoMods, 0x100, programs);
         }
 
-        private void ApplyProgramPatches(IEnumerable<DirectoryInfo> dirs, int protectedOffset, params IExecutable[] programs)
+        private void ApplyProgramPatches(IEnumerable<Mod> mods, int protectedOffset, params IExecutable[] programs)
         {
             MemPatch[] patches = new MemPatch[programs.Length];
 
@@ -344,55 +370,49 @@ namespace Ryujinx.HLE.HOS
                 _ => string.Empty
             }).ToList();
 
-            static string GetModName(DirectoryInfo exefsDir) => exefsDir.Name == ExefsDir ? exefsDir.Parent.Name : exefsDir.Name;
-
             int GetIndex(string buildId) => buildIds.FindIndex(id => id == buildId); // O(n) but list is small
 
             // Collect patches
-            foreach (var patchDir in dirs)
+            foreach (var mod in mods)
             {
+                var patchDir = mod.Exefs;
                 foreach (var patchFile in patchDir.EnumerateFiles())
                 {
-                    switch (patchFile.Extension)
+                    if (string.Equals(".ips", patchFile.Extension, StringComparison.OrdinalIgnoreCase)) // IPS|IPS32
                     {
-                        case ".ips":
-                            {
-                                string filename = Path.GetFileNameWithoutExtension(patchFile.FullName).Split('.')[0];
-                                string buildId = filename.TrimEnd('0');
+                        string filename = Path.GetFileNameWithoutExtension(patchFile.FullName).Split('.')[0];
+                        string buildId = filename.TrimEnd('0');
 
-                                int index = GetIndex(buildId);
-                                if (index == -1)
-                                {
-                                    continue;
-                                }
+                        int index = GetIndex(buildId);
+                        if (index == -1)
+                        {
+                            continue;
+                        }
 
-                                Logger.PrintInfo(LogClass.Loader, $"Found IPS patch '{GetModName(patchDir)}'/'{patchFile.Name}' bid={buildId}");
+                        Logger.PrintInfo(LogClass.Loader, $"Found IPS patch '{patchFile.Name}' in '{mod.Dir.Name}' bid={buildId}");
 
-                                using var fs = patchFile.OpenRead();
-                                using var reader = new BinaryReader(fs);
+                        using var fs = patchFile.OpenRead();
+                        using var reader = new BinaryReader(fs);
 
-                                var patcher = new IpsPatcher(reader);
-                                patcher.AddPatches(patches[index]);
-                            }
-                            break;
+                        var patcher = new IpsPatcher(reader);
+                        patcher.AddPatches(patches[index]);
+                    }
+                    else if (string.Equals(".pchtxt", patchFile.Extension, StringComparison.OrdinalIgnoreCase)) // IPSwitch
+                    {
+                        using var fs = patchFile.OpenRead();
+                        using var reader = new StreamReader(fs);
 
-                        case ".pchtxt":
-                            using (var fs = patchFile.OpenRead())
-                            using (var reader = new StreamReader(fs))
-                            {
-                                var patcher = new IPSwitchPatcher(reader);
+                        var patcher = new IPSwitchPatcher(reader);
 
-                                int index = GetIndex(patcher.BuildId);
-                                if (index == -1)
-                                {
-                                    continue;
-                                }
+                        int index = GetIndex(patcher.BuildId);
+                        if (index == -1)
+                        {
+                            continue;
+                        }
 
-                                Logger.PrintInfo(LogClass.Loader, $"Found IPSwitch patch '{GetModName(patchDir)}'/'{patchFile.Name}' bid={patcher.BuildId}");
+                        Logger.PrintInfo(LogClass.Loader, $"Found IPSwitch patch '{patchFile.Name}' in '{mod.Dir.Name}' bid={patcher.BuildId}");
 
-                                patcher.AddPatches(patches[index]);
-                            }
-                            break;
+                        patcher.AddPatches(patches[index]);
                     }
                 }
             }

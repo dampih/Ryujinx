@@ -35,7 +35,7 @@ namespace Ryujinx.HLE.FileSystem
         private VirtualFileSystem()
         {
             Reload();
-            ModLoader = new ModLoader(this); // Should only be created once
+            ModLoader = new ModLoader(); // Should only be created once
         }
 
         public Stream RomFs { get; private set; }
