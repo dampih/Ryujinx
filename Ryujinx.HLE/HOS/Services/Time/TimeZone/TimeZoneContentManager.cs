@@ -10,6 +10,7 @@ using Ryujinx.HLE.FileSystem;
 using Ryujinx.HLE.FileSystem.Content;
 using Ryujinx.HLE.HOS.Services.Time.Clock;
 using Ryujinx.HLE.Utilities;
+using System;
 using System.Collections.Generic;
 using System.IO;
 
@@ -115,6 +116,72 @@ namespace Ryujinx.HLE.HOS.Services.Time.TimeZone
 
                 Logger.PrintError(LogClass.ServiceTime, TimeZoneSystemTitleMissingErrorMessage);
             }
+        }
+
+        public List<(int Offset, string Location, string Abbr)> ParseTzOffsets()
+        {
+            List<(int Offset, string Location, string Abbr)> outList = new List<(int Offset, string Location, string Abbr)>();
+            var now = System.DateTimeOffset.Now.ToUnixTimeSeconds();
+            using (IStorage ncaStorage = new LocalStorage(_virtualFileSystem.SwitchPathToSystemPath(GetTimeZoneBinaryTitleContentPath()), FileAccess.Read, FileMode.Open))
+            {
+                Nca nca = new Nca(_virtualFileSystem.KeySet, ncaStorage);
+                using IFileSystem romfs = nca.OpenFileSystem(NcaSectionType.Data, _fsIntegrityCheckLevel);
+
+                foreach (string locName in LocationNameCache)
+                {
+                    if (locName.StartsWith("Etc"))
+                    {
+                        continue;
+                    }
+
+                    if (romfs.OpenFile(out IFile tzif, $"/zoneinfo/{locName}".ToU8Span(), OpenMode.Read) != Result.Success)
+                    {
+                        Logger.PrintError(LogClass.ServiceTime, $"Error opening /zoneinfo/{locName}");
+                        continue;
+                    }
+
+                    using (tzif)
+                    {
+                        TimeZone.ParseTimeZoneBinary(out TimeZoneRule r, tzif.AsStream());
+
+                        TimeTypeInfo curTTi;
+                        if (r.TimeCount > 0) // Find the current transition period
+                        {
+                            int fin = 0;
+                            for (int i = 0; i < r.TimeCount; ++i)
+                            {
+                                if (r.Ats[i] <= now)
+                                {
+                                    fin = i;
+                                }
+                            }
+                            curTTi = r.Ttis[r.Types[fin]];
+
+                            var abbrStart = r.Chars.AsSpan(curTTi.AbbreviationListIndex);
+                            int abbrEnd = abbrStart.IndexOf('\0');
+
+                            outList.Add((curTTi.GmtOffset, locName, abbrStart.Slice(0, abbrEnd).ToString()));
+                        }
+                        else if (r.TypeCount >= 1) // Otherwise, use the first offset in TTInfo
+                        {
+                            curTTi = r.Ttis[0];
+
+                            var abbrStart = r.Chars.AsSpan(curTTi.AbbreviationListIndex);
+                            int abbrEnd = abbrStart.IndexOf('\0');
+
+                            outList.Add((curTTi.GmtOffset, locName, abbrStart.Slice(0, abbrEnd).ToString()));
+                        }
+                        else
+                        {
+                            continue;
+                        }
+                    }
+                }
+            }
+
+            outList.Sort();
+
+            return outList;
         }
 
         private bool IsLocationNameValid(string locationName)
