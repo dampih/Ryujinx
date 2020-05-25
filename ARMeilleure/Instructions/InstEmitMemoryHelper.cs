@@ -122,11 +122,15 @@ namespace ARMeilleure.Instructions
 
         private static void EmitReadInt(ArmEmitterContext context, Operand address, int rt, int size)
         {
+            Operand physAddr;
+            Operand lblEnd = Label();
+
+            // Address Translation.
+
             Operand isUnalignedAddr = EmitAddressCheck(context, address, size);
 
             Operand lblFastPath = Label();
             Operand lblSlowPath = Label();
-            Operand lblEnd      = Label();
 
             context.BranchIfFalse(lblFastPath, isUnalignedAddr);
 
@@ -138,7 +142,9 @@ namespace ARMeilleure.Instructions
 
             context.MarkLabel(lblFastPath);
 
-            Operand physAddr = EmitPtPointerLoad(context, address, lblSlowPath);
+            physAddr = EmitPtPointerLoad(context, address, lblSlowPath, false);
+
+            // Address Translation End.
 
             Operand value = null;
 
@@ -174,11 +180,15 @@ namespace ARMeilleure.Instructions
             int elem,
             int size)
         {
+            Operand physAddr;
+            Operand lblEnd = Label();
+
+            // Address Translation.
+
             Operand isUnalignedAddr = EmitAddressCheck(context, address, size);
 
             Operand lblFastPath = Label();
             Operand lblSlowPath = Label();
-            Operand lblEnd      = Label();
 
             context.BranchIfFalse(lblFastPath, isUnalignedAddr);
 
@@ -190,7 +200,9 @@ namespace ARMeilleure.Instructions
 
             context.MarkLabel(lblFastPath);
 
-            Operand physAddr = EmitPtPointerLoad(context, address, lblSlowPath);
+            physAddr = EmitPtPointerLoad(context, address, lblSlowPath, false);
+
+            // Address Translation End.
 
             Operand value = null;
 
@@ -229,11 +241,15 @@ namespace ARMeilleure.Instructions
 
         private static void EmitWriteInt(ArmEmitterContext context, Operand address, int rt, int size)
         {
+            Operand physAddr;
+            Operand lblEnd = Label();
+
+            // Address Translation.
+
             Operand isUnalignedAddr = EmitAddressCheck(context, address, size);
 
             Operand lblFastPath = Label();
             Operand lblSlowPath = Label();
-            Operand lblEnd      = Label();
 
             context.BranchIfFalse(lblFastPath, isUnalignedAddr);
 
@@ -245,7 +261,9 @@ namespace ARMeilleure.Instructions
 
             context.MarkLabel(lblFastPath);
 
-            Operand physAddr = EmitPtPointerLoad(context, address, lblSlowPath);
+            physAddr = EmitPtPointerLoad(context, address, lblSlowPath, true);
+
+            // Address Translation End.
 
             Operand value = GetInt(context, rt);
 
@@ -272,11 +290,15 @@ namespace ARMeilleure.Instructions
             int elem,
             int size)
         {
+            Operand physAddr;
+            Operand lblEnd = Label();
+
+            // Address Translation.
+
             Operand isUnalignedAddr = EmitAddressCheck(context, address, size);
 
             Operand lblFastPath = Label();
             Operand lblSlowPath = Label();
-            Operand lblEnd      = Label();
 
             context.BranchIfFalse(lblFastPath, isUnalignedAddr);
 
@@ -288,7 +310,9 @@ namespace ARMeilleure.Instructions
 
             context.MarkLabel(lblFastPath);
 
-            Operand physAddr = EmitPtPointerLoad(context, address, lblSlowPath);
+            physAddr = EmitPtPointerLoad(context, address, lblSlowPath, true);
+
+            // Address Translation End.
 
             Operand value = GetVec(rt);
 
@@ -327,7 +351,7 @@ namespace ARMeilleure.Instructions
             return context.BitwiseAnd(address, Const(address.Type, (long)addressCheckMask));
         }
 
-        private static Operand EmitPtPointerLoad(ArmEmitterContext context, Operand address, Operand lblSlowPath)
+        private static Operand EmitPtPointerLoad(ArmEmitterContext context, Operand address, Operand lblSlowPath, bool write)
         {
             int ptLevelBits = context.Memory.AddressSpaceBits - 12; // 12 = Number of page bits.
             int ptLevelSize = 1 << ptLevelBits;
@@ -361,7 +385,10 @@ namespace ARMeilleure.Instructions
             }
             while (bit < context.Memory.AddressSpaceBits);
 
-            context.BranchIfTrue(lblSlowPath, context.ICompareLess(pte, Const(0L)));
+            // Software memory protection, used for write tracking.
+            ulong protection = (write ? 3UL : 1UL) << 48;
+            context.BranchIfTrue(lblSlowPath, context.BitwiseAnd(pte, Const(protection)));
+            pte = context.BitwiseAnd(pte, Const(~(0xffffUL << 48))); // Ignore any software protection bits. (they are still used by c# memory access)
 
             Operand pageOffset = context.BitwiseAnd(address, Const(address.Type, PageMask));
 
