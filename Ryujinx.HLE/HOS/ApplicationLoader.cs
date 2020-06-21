@@ -152,17 +152,6 @@ namespace Ryujinx.HLE.HOS
             _contentManager.ClearAocData();
             _contentManager.AddAocData(securePartition, xciFile, mainNca.Header.TitleId);
 
-            // Check all nsp's in the base directory for AOC
-            foreach (var fn in new FileInfo(xciFile).Directory.EnumerateFiles("*.nsp"))
-            {
-                using (FileStream fs = fn.OpenRead())
-                using (IStorage storage = fs.AsStorage())
-                using (PartitionFileSystem pfs = new PartitionFileSystem(storage))
-                {
-                    _contentManager.AddAocData(pfs, fn.FullName, mainNca.Header.TitleId);
-                }
-            }
-
             LoadNca(mainNca, patchNca, controlNca);
         }
 
@@ -199,18 +188,6 @@ namespace Ryujinx.HLE.HOS
                 _contentManager.ClearAocData();
                 _contentManager.AddAocData(nsp, nspFile, mainNca.Header.TitleId);
 
-                // Check all nsp's in the base directory for AOC
-                foreach (var fn in new FileInfo(nspFile).Directory.EnumerateFiles("*.nsp"))
-                {
-                    if (fn.FullName == nspFile) continue;
-                    using (FileStream fs = fn.OpenRead())
-                    using (IStorage storage = fs.AsStorage())
-                    using (PartitionFileSystem pfs = new PartitionFileSystem(storage))
-                    {
-                        _contentManager.AddAocData(pfs, fn.FullName, mainNca.Header.TitleId);
-                    }
-                }
-
                 LoadNca(mainNca, patchNca, controlNca);
 
                 return;
@@ -241,7 +218,8 @@ namespace Ryujinx.HLE.HOS
             IStorage dataStorage = null;
             IFileSystem codeFs = null;
 
-            string titleUpdateMetadataPath = System.IO.Path.Combine(_fileSystem.GetBasePath(), "games", mainNca.Header.TitleId.ToString("x16"), "updates.json");
+            // Load Update
+            string titleUpdateMetadataPath = Path.Combine(_fileSystem.GetBasePath(), "games", mainNca.Header.TitleId.ToString("x16"), "updates.json");
 
             if (File.Exists(titleUpdateMetadataPath))
             {
@@ -273,6 +251,24 @@ namespace Ryujinx.HLE.HOS
                         {
                             controlNca = nca;
                         }
+                    }
+                }
+            }
+
+            // Load Aoc
+            string titleAocMetadataPath = Path.Combine(_fileSystem.GetBasePath(), "games", mainNca.Header.TitleId.ToString("x16"), "dlc.json");
+
+            if (File.Exists(titleAocMetadataPath))
+            {
+                List<DlcMetadata> dlcMetadataList = JsonHelper.DeserializeFromFile<List<DlcMetadata>>(titleAocMetadataPath);
+
+                foreach (DlcMetadata dlcMetadata in dlcMetadataList)
+                {
+                    using (FileStream fileStream = new FileStream(dlcMetadata.Path, FileMode.Open, FileAccess.Read))
+                    using (IStorage storage = fileStream.AsStorage())
+                    using (PartitionFileSystem nsp = new PartitionFileSystem(storage))
+                    {
+                        _contentManager.AddAocData(nsp, dlcMetadata.Path, mainNca.Header.TitleId, dlcMetadata.Enabled);
                     }
                 }
             }
