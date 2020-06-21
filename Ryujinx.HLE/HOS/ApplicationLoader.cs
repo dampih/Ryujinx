@@ -335,7 +335,7 @@ namespace Ryujinx.HLE.HOS
 
             LoadExeFs(codeFs, metaData);
 
-            Logger.PrintInfo(LogClass.Loader, $"Application Loaded: {TitleName} v{TitleVersionString} [{TitleIdText}] [{(TitleIs64Bit ? "64-bit" : "32-bit")}]");
+            Logger.PrintInfo(LogClass.Loader, $"Application Loaded: {TitleName} v{DisplayVersion} [{TitleIdText}] [{(TitleIs64Bit ? "64-bit" : "32-bit")}]");
         }
 
         // Sets TitleId, so be sure to call before using it
