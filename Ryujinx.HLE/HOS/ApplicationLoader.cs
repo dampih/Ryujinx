@@ -326,8 +326,6 @@ namespace Ryujinx.HLE.HOS
                 _fileSystem.SetRomFs(newStorage.AsStream(FileAccess.Read));
             }
 
-            LoadExeFs(codeFs, out _);
-
             if (TitleId != 0)
             {
                 EnsureSaveData(new TitleId(TitleId));
