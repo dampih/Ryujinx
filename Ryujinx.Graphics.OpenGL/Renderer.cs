@@ -22,6 +22,8 @@ namespace Ryujinx.Graphics.OpenGL
 
         internal TextureCopy TextureCopy { get; }
 
+        internal DisposedResourceCache ResourceCache { get; }
+
         public string GpuVendor { get; private set; }
         public string GpuRenderer { get; private set; }
         public string GpuVersion { get; private set; }
@@ -32,6 +34,7 @@ namespace Ryujinx.Graphics.OpenGL
             _counters = new Counters();
             _window = new Window(this);
             TextureCopy = new TextureCopy(this);
+            ResourceCache = new DisposedResourceCache();
         }
 
         public IShader CompileShader(ShaderProgram shader)
@@ -56,7 +59,14 @@ namespace Ryujinx.Graphics.OpenGL
 
         public ITexture CreateTexture(TextureCreateInfo info, float scaleFactor)
         {
-            return info.Target == Target.TextureBuffer ? new TextureBuffer(info) : new TextureStorage(this, info, scaleFactor).CreateDefaultView();
+            if (info.Target == Target.TextureBuffer)
+            {
+                return new TextureBuffer(info);
+            }
+            else
+            {
+                return ResourceCache.TryGetTexture(info, scaleFactor) ?? new TextureStorage(this, info, scaleFactor).CreateDefaultView();
+            }
         }
 
         public void DeleteBuffer(BufferHandle buffer)
@@ -89,6 +99,11 @@ namespace Ryujinx.Graphics.OpenGL
         public void UpdateCounters()
         {
             _counters.Update();
+        }
+
+        public void PreFrame()
+        {
+            ResourceCache.Tick();
         }
 
         public ICounterEvent ReportCounter(CounterType type, EventHandler<ulong> resultHandler)

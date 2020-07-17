@@ -153,6 +153,8 @@ namespace Ryujinx.HLE
 
         public void ProcessFrame()
         {
+            Gpu.Renderer.PreFrame();
+
             Gpu.GPFifo.DispatchCalls();
         }
 
