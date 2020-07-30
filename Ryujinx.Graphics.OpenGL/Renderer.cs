@@ -65,7 +65,7 @@ namespace Ryujinx.Graphics.OpenGL
             }
             else
             {
-                return ResourcePool.TryGetTexture(info, scaleFactor) ?? new TextureStorage(this, info, scaleFactor).CreateDefaultView();
+                return ResourcePool.GetTextureOrNull(info, scaleFactor) ?? new TextureStorage(this, info, scaleFactor).CreateDefaultView();
             }
         }
 
@@ -135,6 +135,7 @@ namespace Ryujinx.Graphics.OpenGL
         public void Dispose()
         {
             TextureCopy.Dispose();
+            ResourcePool.Dispose();
             _pipeline.Dispose();
             _window.Dispose();
             _counters.Dispose();
