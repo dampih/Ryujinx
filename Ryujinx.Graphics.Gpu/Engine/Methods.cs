@@ -246,7 +246,7 @@ namespace Ryujinx.Graphics.Gpu.Engine
                                     MethodOffset.VertexBufferState,
                                     MethodOffset.VertexBufferEndAddress))
             {
-                UpdateVertexBufferState(state);
+                UpdateVertexBufferState(state, indexCount);
             }
 
             if (state.QueryModified(MethodOffset.FaceState))
@@ -774,14 +774,14 @@ namespace Ryujinx.Graphics.Gpu.Engine
 
             // The index buffer affects the vertex buffer size calculation, we
             // need to ensure that they are updated.
-            UpdateVertexBufferState(state);
+            UpdateVertexBufferState(state, indexCount);
         }
 
         /// <summary>
         /// Updates host vertex buffer bindings based on guest GPU state.
         /// </summary>
         /// <param name="state">Current GPU state</param>
-        private void UpdateVertexBufferState(GpuState state)
+        private void UpdateVertexBufferState(GpuState state, int indexCount)
         {
             _isAnyVbInstanced = false;
 
@@ -814,7 +814,14 @@ namespace Ryujinx.Graphics.Gpu.Engine
                 {
                     // This size may be (much) larger than the real vertex buffer size.
                     // Avoid calculating it this way, unless we don't have any other option.
-                    size = endAddress.Pack() - address + 1;
+                    if (_drawIndexed && stride != 0)
+                    {
+                        size = GetVertexCountFromIb(state, indexCount) * (ulong)stride;
+                    }
+                    else
+                    {
+                        size = endAddress.Pack() - address + 1;
+                    }
                 }
                 else
                 {
@@ -829,6 +836,47 @@ namespace Ryujinx.Graphics.Gpu.Engine
 
                 BufferManager.SetVertexBuffer(index, address, size, stride, divisor);
             }
+        }
+
+        private ulong GetVertexCountFromIb(GpuState state, int indexCount)
+        {
+            var indexBuffer = state.Get<IndexBufferState>(MethodOffset.IndexBufferState);
+
+            ulong gpuVa = indexBuffer.Address.Pack();
+            uint max = 0;
+
+            switch (indexBuffer.Type)
+            {
+                case IndexType.UByte:
+                    {
+                        ReadOnlySpan<byte> data = _context.MemoryManager.GetSpan(gpuVa, indexCount);
+                        for (int i = 0; i < data.Length; i++)
+                        {
+                            if (max < data[i]) max = data[i];
+                        }
+                        break;
+                    }
+                case IndexType.UShort:
+                    {
+                        ReadOnlySpan<ushort> data = MemoryMarshal.Cast<byte, ushort>(_context.MemoryManager.GetSpan(gpuVa, indexCount * 2));
+                        for (int i = 0; i < data.Length; i++)
+                        {
+                            if (max < data[i]) max = data[i];
+                        }
+                        break;
+                    }
+                case IndexType.UInt:
+                    {
+                        ReadOnlySpan<uint> data = MemoryMarshal.Cast<byte, uint>(_context.MemoryManager.GetSpan(gpuVa, indexCount * 4));
+                        for (int i = 0; i < data.Length; i++)
+                        {
+                            if (max < data[i]) max = data[i];
+                        }
+                        break;
+                    }
+            }
+
+            return (ulong)max + 1;
         }
 
         /// <summary>
