@@ -246,7 +246,7 @@ namespace Ryujinx.Graphics.Gpu.Engine
                                     MethodOffset.VertexBufferState,
                                     MethodOffset.VertexBufferEndAddress))
             {
-                UpdateVertexBufferState(state, indexCount);
+                UpdateVertexBufferState(state, firstIndex, indexCount);
             }
 
             if (state.QueryModified(MethodOffset.FaceState))
@@ -774,14 +774,15 @@ namespace Ryujinx.Graphics.Gpu.Engine
 
             // The index buffer affects the vertex buffer size calculation, we
             // need to ensure that they are updated.
-            UpdateVertexBufferState(state, indexCount);
+            UpdateVertexBufferState(state, firstIndex, indexCount);
         }
 
         /// <summary>
         /// Updates host vertex buffer bindings based on guest GPU state.
         /// </summary>
-        /// <param name="state">Current GPU state</param>
-        private void UpdateVertexBufferState(GpuState state, int indexCount)
+        /// <param name="firstIndex">Index of the first index buffer element used on the draw</param>
+        /// <param name="indexCount">Number of index buffer elements used on the draw</param>
+        private void UpdateVertexBufferState(GpuState state, int firstIndex, int indexCount)
         {
             _isAnyVbInstanced = false;
 
@@ -814,13 +815,19 @@ namespace Ryujinx.Graphics.Gpu.Engine
                 {
                     // This size may be (much) larger than the real vertex buffer size.
                     // Avoid calculating it this way, unless we don't have any other option.
-                    if (_drawIndexed && stride != 0)
+                    ulong vbSizeMax = endAddress.Pack() - address + 1;
+
+                    bool ibCountingProfitable = IbUtils.IsIbCountingProfitable(vbSizeMax, indexCount);
+
+                    if (ibCountingProfitable && !_ibStreamer.HasInlineIndexData && _drawIndexed && stride != 0)
                     {
-                        size = GetVertexCountFromIb(state, indexCount) * (ulong)stride;
+                        ulong vertexCount = IbUtils.GetVertexCount(_context.MemoryManager, state, firstIndex, indexCount);
+
+                        size = Math.Min(vertexCount * (ulong)stride, vbSizeMax);
                     }
                     else
                     {
-                        size = endAddress.Pack() - address + 1;
+                        size = vbSizeMax;
                     }
                 }
                 else
@@ -836,47 +843,6 @@ namespace Ryujinx.Graphics.Gpu.Engine
 
                 BufferManager.SetVertexBuffer(index, address, size, stride, divisor);
             }
-        }
-
-        private ulong GetVertexCountFromIb(GpuState state, int indexCount)
-        {
-            var indexBuffer = state.Get<IndexBufferState>(MethodOffset.IndexBufferState);
-
-            ulong gpuVa = indexBuffer.Address.Pack();
-            uint max = 0;
-
-            switch (indexBuffer.Type)
-            {
-                case IndexType.UByte:
-                    {
-                        ReadOnlySpan<byte> data = _context.MemoryManager.GetSpan(gpuVa, indexCount);
-                        for (int i = 0; i < data.Length; i++)
-                        {
-                            if (max < data[i]) max = data[i];
-                        }
-                        break;
-                    }
-                case IndexType.UShort:
-                    {
-                        ReadOnlySpan<ushort> data = MemoryMarshal.Cast<byte, ushort>(_context.MemoryManager.GetSpan(gpuVa, indexCount * 2));
-                        for (int i = 0; i < data.Length; i++)
-                        {
-                            if (max < data[i]) max = data[i];
-                        }
-                        break;
-                    }
-                case IndexType.UInt:
-                    {
-                        ReadOnlySpan<uint> data = MemoryMarshal.Cast<byte, uint>(_context.MemoryManager.GetSpan(gpuVa, indexCount * 4));
-                        for (int i = 0; i < data.Length; i++)
-                        {
-                            if (max < data[i]) max = data[i];
-                        }
-                        break;
-                    }
-            }
-
-            return (ulong)max + 1;
         }
 
         /// <summary>
