@@ -139,7 +139,16 @@ namespace Ryujinx.Graphics.Shader.StructuredIr
 
                 if (operation is TextureOperation texOp)
                 {
-                    if (texOp.Inst == Instruction.ImageLoad)
+                    if (texOp.Inst == Instruction.ImageLoad ||
+                        texOp.Inst == Instruction.ImageStore ||
+                        texOp.Inst == Instruction.ImageAtomic)
+                    {
+                        dest.VarType = texOp.Format.GetComponentType();
+                    }
+
+                    AstTextureOperation astTexOp = GetAstTextureOperation(texOp);
+
+                    if (texOp.Inst == Instruction.ImageLoad || texOp.Inst == Instruction.ImageAtomic)
                     {
                         dest.VarType = texOp.Format.GetComponentType();
                     }
