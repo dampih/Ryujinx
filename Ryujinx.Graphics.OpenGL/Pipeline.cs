@@ -187,11 +187,11 @@ namespace Ryujinx.Graphics.OpenGL
 
             PreDraw();
 
-            if (_primitiveType == PrimitiveType.Quads)
+            if (_primitiveType == PrimitiveType.Quads && !HwCapabilities.SupportsQuads)
             {
                 DrawQuadsImpl(vertexCount, instanceCount, firstVertex, firstInstance);
             }
-            else if (_primitiveType == PrimitiveType.QuadStrip)
+            else if (_primitiveType == PrimitiveType.QuadStrip && !HwCapabilities.SupportsQuads)
             {
                 DrawQuadStripImpl(vertexCount, instanceCount, firstVertex, firstInstance);
             }
@@ -315,7 +315,7 @@ namespace Ryujinx.Graphics.OpenGL
 
             IntPtr indexBaseOffset = _indexBaseOffset + firstIndex * indexElemSize;
 
-            if (_primitiveType == PrimitiveType.Quads)
+            if (_primitiveType == PrimitiveType.Quads && !HwCapabilities.SupportsQuads)
             {
                 DrawQuadsIndexedImpl(
                     indexCount,
@@ -325,7 +325,7 @@ namespace Ryujinx.Graphics.OpenGL
                     firstVertex,
                     firstInstance);
             }
-            else if (_primitiveType == PrimitiveType.QuadStrip)
+            else if (_primitiveType == PrimitiveType.QuadStrip && !HwCapabilities.SupportsQuads)
             {
                 DrawQuadStripIndexedImpl(
                     indexCount,
