@@ -290,16 +290,30 @@ namespace Ryujinx.Ui
         {
             if (e.Data.Length > 0)
             {
-                string path = System.IO.Path.Combine(System.Environment.GetFolderPath(System.Environment.SpecialFolder.MyPictures), $"screen-{DateTime.Now}.png".Replace('/', '-').Replace(':', '-'));
+                string path = System.IO.Path.Combine(System.Environment.GetFolderPath(System.Environment.SpecialFolder.MyPictures), $"ryujinx-capture-{DateTime.Now}.png".Replace('/', '-').Replace(':', '-'));
 
-                using (var image = SixLabors.ImageSharp.Image.LoadPixelData<SixLabors.ImageSharp.PixelFormats.Rgba32>(e.Data, e.Width, e.Height))
+                if (e.IsBgra)
                 {
-                    image.SaveAsPng(path, new SixLabors.ImageSharp.Formats.Png.PngEncoder(){
-                        ColorType = SixLabors.ImageSharp.Formats.Png.PngColorType.Rgb
-                    });
+                    using (var image = SixLabors.ImageSharp.Image.LoadPixelData <SixLabors.ImageSharp.PixelFormats.Bgra32> (e.Data, e.Width, e.Height))
+                    {
+                        image.SaveAsPng(path, new SixLabors.ImageSharp.Formats.Png.PngEncoder()
+                        {
+                            ColorType = SixLabors.ImageSharp.Formats.Png.PngColorType.Rgb
+                        });
 
-                    Logger.Notice.Print(LogClass.Application, $"ScreenShot saved to {path}", "ScreenShot");
+                    }
                 }
+                else 
+                {
+                    using (var image = SixLabors.ImageSharp.Image.LoadPixelData <SixLabors.ImageSharp.PixelFormats.Rgba32> (e.Data, e.Width, e.Height))
+                    {
+                        image.SaveAsPng(path, new SixLabors.ImageSharp.Formats.Png.PngEncoder()
+                        {
+                            ColorType = SixLabors.ImageSharp.Formats.Png.PngColorType.Rgb
+                        });
+                    }
+                }
+                Logger.Notice.Print(LogClass.Application, $"ScreenShot saved to {path}", "Screenshot");
             }
         }
 
