@@ -4,6 +4,7 @@ using Gdk;
 using Gtk;
 using Ryujinx.Common;
 using Ryujinx.Common.Configuration;
+using Ryujinx.Common.Logging;
 using Ryujinx.Configuration;
 using Ryujinx.Graphics.GAL;
 using Ryujinx.HLE.HOS.Services.Hid;
@@ -11,8 +12,12 @@ using Ryujinx.Input;
 using Ryujinx.Input.GTK3;
 using Ryujinx.Input.HLE;
 using Ryujinx.Ui.Widgets;
+using SixLabors.ImageSharp;
 using System;
 using System.Diagnostics;
+using System.Drawing;
+using System.Drawing.Imaging;
+using System.IO;
 using System.Linq;
 using System.Threading;
 
@@ -272,8 +277,30 @@ namespace Ryujinx.Ui
             Renderer = Device.Gpu.Renderer;
             Renderer?.Window.SetSize(_windowWidth, _windowHeight);
 
+            if(Renderer != null)
+            {
+                Renderer.ScreenShotSaved += Renderer_ScreenShotSaved;
+            }
+
             NpadManager.Initialize(device, ConfigurationState.Instance.Hid.InputConfig, ConfigurationState.Instance.Hid.EnableKeyboard);
             TouchScreenManager.Initialize(device);
+        }
+
+        private unsafe void Renderer_ScreenShotSaved(object sender, ScreenShotImageInfo e)
+        {
+            if (e.Data.Length > 0)
+            {
+                string path = System.IO.Path.Combine(System.Environment.GetFolderPath(System.Environment.SpecialFolder.MyPictures), $"screen-{DateTime.Now}.png".Replace('/', '-'));
+
+                using (var image = SixLabors.ImageSharp.Image.LoadPixelData<SixLabors.ImageSharp.PixelFormats.Rgba32>(e.Data, e.Width, e.Height))
+                {
+                    image.SaveAsPng(path, new SixLabors.ImageSharp.Formats.Png.PngEncoder(){
+                        ColorType = SixLabors.ImageSharp.Formats.Png.PngColorType.Rgb
+                    });
+
+                    Logger.Notice.Print(LogClass.Application, $"ScreenShot saved to {path}", "ScreenShot");
+                }
+            }
         }
 
         public void Render()
@@ -475,6 +502,12 @@ namespace Ryujinx.Ui
                     Device.EnableDeviceVsync = !Device.EnableDeviceVsync;
                 }
 
+                if (currentHotkeyState.HasFlag(KeyboardHotkeyState.ScreenShot) &&
+                    !_prevHotkeyState.HasFlag(KeyboardHotkeyState.ScreenShot))
+                {
+                    Renderer.ScreenShot();
+                }
+
                 _prevHotkeyState = currentHotkeyState;
             }
 
@@ -501,7 +534,8 @@ namespace Ryujinx.Ui
         private enum KeyboardHotkeyState
         {
             None,
-            ToggleVSync
+            ToggleVSync,
+            ScreenShot
         }
 
         private KeyboardHotkeyState GetHotkeyState()
@@ -511,6 +545,11 @@ namespace Ryujinx.Ui
             if (_keyboardInterface.IsPressed((Key)ConfigurationState.Instance.Hid.Hotkeys.Value.ToggleVsync))
             {
                 state |= KeyboardHotkeyState.ToggleVSync;
+            }
+            
+            if (_keyboardInterface.IsPressed((Key)ConfigurationState.Instance.Hid.Hotkeys.Value.ScreenShot))
+            {
+                state |= KeyboardHotkeyState.ScreenShot;
             }
 
             return state;

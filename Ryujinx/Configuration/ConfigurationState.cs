@@ -534,7 +534,8 @@ namespace Ryujinx.Configuration
             Hid.EnableKeyboard.Value               = false;
             Hid.Hotkeys.Value = new KeyboardHotkeys
             {
-                ToggleVsync = Key.Tab
+                ToggleVsync = Key.Tab,
+                ScreenShot = Key.F9
             };
             Hid.InputConfig.Value = new List<InputConfig>
             {
@@ -824,6 +825,19 @@ namespace Ryujinx.Configuration
                 Common.Logging.Logger.Warning?.Print(LogClass.Application, $"Outdated configuration version {configurationFileFormat.Version}, migrating to version 26.");
 
                 configurationFileFormat.MemoryManagerMode = MemoryManagerMode.HostMappedUnsafe;
+
+                configurationFileUpdated = true;
+            }
+
+            if (configurationFileFormat.Version < 27)
+            {
+                Common.Logging.Logger.Warning?.Print(LogClass.Application, $"Outdated configuration version {configurationFileFormat.Version}, migrating to version 27.");
+
+                configurationFileFormat.Hotkeys = new KeyboardHotkeys
+                {
+                    ToggleVsync = Key.Tab,
+                    ScreenShot = Key.F9
+                };
 
                 configurationFileUpdated = true;
             }

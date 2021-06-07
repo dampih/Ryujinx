@@ -28,6 +28,8 @@ namespace Ryujinx.Graphics.OpenGL
 
         private Sync _sync;
 
+        public event EventHandler<ScreenShotImageInfo> ScreenShotSaved;
+
         internal ResourcePool ResourcePool { get; }
 
         internal int BufferCount { get; private set; }
@@ -194,6 +196,16 @@ namespace Ryujinx.Graphics.OpenGL
         public void WaitSync(ulong id)
         {
             _sync.Wait(id);
+        }
+
+        public void ScreenShot()
+        {
+            _window.ScreenShotRequested = true;
+        }
+
+        public void OnScreenShotSaved(ScreenShotImageInfo bitmap)
+        {
+            ScreenShotSaved?.Invoke(this, bitmap);
         }
     }
 }
