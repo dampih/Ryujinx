@@ -294,7 +294,7 @@ namespace Ryujinx.Ui
 
                 if (e.IsBgra)
                 {
-                    using (var image = SixLabors.ImageSharp.Image.LoadPixelData <SixLabors.ImageSharp.PixelFormats.Bgra32> (e.Data, e.Width, e.Height))
+                    using (var image = SixLabors.ImageSharp.Image.LoadPixelData<SixLabors.ImageSharp.PixelFormats.Bgra32>(e.Data, e.Width, e.Height))
                     {
                         image.SaveAsPng(path, new SixLabors.ImageSharp.Formats.Png.PngEncoder()
                         {
@@ -303,9 +303,9 @@ namespace Ryujinx.Ui
 
                     }
                 }
-                else 
+                else
                 {
-                    using (var image = SixLabors.ImageSharp.Image.LoadPixelData <SixLabors.ImageSharp.PixelFormats.Rgba32> (e.Data, e.Width, e.Height))
+                    using (var image = SixLabors.ImageSharp.Image.LoadPixelData<SixLabors.ImageSharp.PixelFormats.Rgba32>(e.Data, e.Width, e.Height))
                     {
                         image.SaveAsPng(path, new SixLabors.ImageSharp.Formats.Png.PngEncoder()
                         {
