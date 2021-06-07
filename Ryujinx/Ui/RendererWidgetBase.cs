@@ -290,7 +290,7 @@ namespace Ryujinx.Ui
         {
             if (e.Data.Length > 0)
             {
-                string path = System.IO.Path.Combine(System.Environment.GetFolderPath(System.Environment.SpecialFolder.MyPictures), $"screen-{DateTime.Now}.png".Replace('/', '-'));
+                string path = System.IO.Path.Combine(System.Environment.GetFolderPath(System.Environment.SpecialFolder.MyPictures), $"screen-{DateTime.Now}.png".Replace('/', '-').Replace(':', '-'));
 
                 using (var image = SixLabors.ImageSharp.Image.LoadPixelData<SixLabors.ImageSharp.PixelFormats.Rgba32>(e.Data, e.Width, e.Height))
                 {
