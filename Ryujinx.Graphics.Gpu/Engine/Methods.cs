@@ -252,7 +252,7 @@ namespace Ryujinx.Graphics.Gpu.Engine
                                     MethodOffset.VertexBufferState,
                                     MethodOffset.VertexBufferEndAddress))
             {
-                UpdateVertexBufferState(state);
+                UpdateVertexBufferState(state, firstIndex, indexCount);
             }
 
             if (state.QueryModified(MethodOffset.FaceState))
@@ -775,14 +775,15 @@ namespace Ryujinx.Graphics.Gpu.Engine
 
             // The index buffer affects the vertex buffer size calculation, we
             // need to ensure that they are updated.
-            UpdateVertexBufferState(state);
+            UpdateVertexBufferState(state, firstIndex, indexCount);
         }
 
         /// <summary>
         /// Updates host vertex buffer bindings based on guest GPU state.
         /// </summary>
-        /// <param name="state">Current GPU state</param>
-        private void UpdateVertexBufferState(GpuState state)
+        /// <param name="firstIndex">Index of the first index buffer element used on the draw</param>
+        /// <param name="indexCount">Number of index buffer elements used on the draw</param>
+        private void UpdateVertexBufferState(GpuState state, int firstIndex, int indexCount)
         {
             _isAnyVbInstanced = false;
 
@@ -815,7 +816,20 @@ namespace Ryujinx.Graphics.Gpu.Engine
                 {
                     // This size may be (much) larger than the real vertex buffer size.
                     // Avoid calculating it this way, unless we don't have any other option.
-                    size = endAddress.Pack() - address + 1;
+                    ulong vbSizeMax = endAddress.Pack() - address + 1;
+
+                    bool ibCountingProfitable = IbUtils.IsIbCountingProfitable(vbSizeMax, indexCount);
+
+                    if (ibCountingProfitable && !_ibStreamer.HasInlineIndexData && _drawIndexed && stride != 0)
+                    {
+                        ulong vertexCount = IbUtils.GetVertexCount(_context.MemoryManager, state, firstIndex, indexCount);
+
+                        size = Math.Min(vertexCount * (ulong)stride, vbSizeMax);
+                    }
+                    else
+                    {
+                        size = vbSizeMax;
+                    }
                 }
                 else
                 {
