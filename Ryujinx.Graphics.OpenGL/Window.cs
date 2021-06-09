@@ -110,9 +110,9 @@ namespace Ryujinx.Graphics.OpenGL
 
             if(ScreenCaptureRequested)
             {
-                ScreenCaptureRequested = false;
-
                 CaptureFrame(srcX0, srcY0, srcX1, srcY1, view.Format.IsBgra8(), crop.FlipX, crop.FlipY);
+                
+                ScreenCaptureRequested = false;
             }
 
             GL.BlitFramebuffer(

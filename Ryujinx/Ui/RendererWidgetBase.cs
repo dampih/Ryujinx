@@ -19,6 +19,7 @@ using SixLabors.ImageSharp.Processing;
 using System;
 using System.Diagnostics;
 using System.Threading;
+using System.Threading.Tasks;
 
 namespace Ryujinx.Ui
 {
@@ -292,31 +293,37 @@ namespace Ryujinx.Ui
         {
             if (e.Data.Length > 0)
             {
-                var currentTime = DateTime.Now;
-                string filename = $"ryujinx_capture_{currentTime.Year}-{currentTime.Month:D2}-{currentTime.Day:D2}_{currentTime.Hour:D2}-{currentTime.Minute:D2}-{currentTime.Second:D2}.png";
-                string path = System.IO.Path.Combine(System.Environment.GetFolderPath(System.Environment.SpecialFolder.MyPictures),
-                    filename);
-
-                Image image = e.IsBgra ? Image.LoadPixelData<Bgra32>(e.Data, e.Width, e.Height)
-                            : Image.LoadPixelData<Rgba32>(e.Data, e.Width, e.Height);
-
-                if (e.FlipX)
+                Task.Run(() =>
                 {
-                    image.Mutate(x => x.Flip(FlipMode.Horizontal));
-                }
-                if (e.FlipY)
-                {
-                    image.Mutate(x => x.Flip(FlipMode.Vertical));
-                }
+                    lock (this)
+                    {
+                        var currentTime = DateTime.Now;
+                        string filename = $"ryujinx_capture_{currentTime.Year}-{currentTime.Month:D2}-{currentTime.Day:D2}_{currentTime.Hour:D2}-{currentTime.Minute:D2}-{currentTime.Second:D2}.png";
+                        string path = System.IO.Path.Combine(System.Environment.GetFolderPath(System.Environment.SpecialFolder.MyPictures),
+                            filename);
 
-                image.SaveAsPng(path, new PngEncoder()
-                {
-                    ColorType = PngColorType.Rgb
+                        Image image = e.IsBgra ? Image.LoadPixelData<Bgra32>(e.Data, e.Width, e.Height)
+                                    : Image.LoadPixelData<Rgba32>(e.Data, e.Width, e.Height);
+
+                        if (e.FlipX)
+                        {
+                            image.Mutate(x => x.Flip(FlipMode.Horizontal));
+                        }
+                        if (e.FlipY)
+                        {
+                            image.Mutate(x => x.Flip(FlipMode.Vertical));
+                        }
+
+                        image.SaveAsPng(path, new PngEncoder()
+                        {
+                            ColorType = PngColorType.Rgb
+                        });
+
+                        image.Dispose();
+
+                        Logger.Notice.Print(LogClass.Application, $"ScreenShot saved to {path}", "Screenshot");
+                    }
                 });
-
-                image.Dispose();
-
-                Logger.Notice.Print(LogClass.Application, $"ScreenShot saved to {path}", "Screenshot");
             }
         }
 
