@@ -6,7 +6,7 @@ namespace Ryujinx.Graphics.GAL
 {
     public interface IRenderer : IDisposable
     {
-        event EventHandler<ScreenShotImageInfo> ScreenShotSaved;
+        event EventHandler<ScreenCaptureImageInfo> ScreenCaptured;
 
         IPipeline Pipeline { get; }
 

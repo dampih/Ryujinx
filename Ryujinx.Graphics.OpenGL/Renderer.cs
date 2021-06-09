@@ -28,7 +28,7 @@ namespace Ryujinx.Graphics.OpenGL
 
         private Sync _sync;
 
-        public event EventHandler<ScreenShotImageInfo> ScreenShotSaved;
+        public event EventHandler<ScreenCaptureImageInfo> ScreenCaptured;
 
         internal ResourcePool ResourcePool { get; }
 
@@ -200,12 +200,12 @@ namespace Ryujinx.Graphics.OpenGL
 
         public void ScreenShot()
         {
-            _window.ScreenShotRequested = true;
+            _window.ScreenCaptureRequested = true;
         }
 
-        public void OnScreenShotSaved(ScreenShotImageInfo bitmap)
+        public void OnScreenCaptured(ScreenCaptureImageInfo bitmap)
         {
-            ScreenShotSaved?.Invoke(this, bitmap);
+            ScreenCaptured?.Invoke(this, bitmap);
         }
     }
 }

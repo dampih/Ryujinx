@@ -279,14 +279,14 @@ namespace Ryujinx.Ui
 
             if(Renderer != null)
             {
-                Renderer.ScreenShotSaved += Renderer_ScreenShotSaved;
+                Renderer.ScreenCaptured += Renderer_ScreenshotSaved;
             }
 
             NpadManager.Initialize(device, ConfigurationState.Instance.Hid.InputConfig, ConfigurationState.Instance.Hid.EnableKeyboard);
             TouchScreenManager.Initialize(device);
         }
 
-        private unsafe void Renderer_ScreenShotSaved(object sender, ScreenShotImageInfo e)
+        private unsafe void Renderer_ScreenshotSaved(object sender, ScreenCaptureImageInfo e)
         {
             if (e.Data.Length > 0)
             {
