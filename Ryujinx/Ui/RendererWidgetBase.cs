@@ -18,6 +18,7 @@ using SixLabors.ImageSharp.PixelFormats;
 using SixLabors.ImageSharp.Processing;
 using System;
 using System.Diagnostics;
+using System.IO;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -297,10 +298,12 @@ namespace Ryujinx.Ui
                 {
                     lock (this)
                     {
-                        var currentTime = DateTime.Now;
-                        string filename = $"ryujinx_capture_{currentTime.Year}-{currentTime.Month:D2}-{currentTime.Day:D2}_{currentTime.Hour:D2}-{currentTime.Minute:D2}-{currentTime.Second:D2}.png";
-                        string path = System.IO.Path.Combine(System.Environment.GetFolderPath(System.Environment.SpecialFolder.MyPictures),
-                            filename);
+                        var currentTime  = DateTime.Now;
+                        string filename  = $"ryujinx_capture_{currentTime.Year}-{currentTime.Month:D2}-{currentTime.Day:D2}_{currentTime.Hour:D2}-{currentTime.Minute:D2}-{currentTime.Second:D2}.png";
+                        string directory = System.IO.Path.Combine(System.Environment.GetFolderPath(System.Environment.SpecialFolder.MyPictures), "Ryujinx");
+                        string path      = System.IO.Path.Combine(directory, filename);
+
+                        Directory.CreateDirectory(directory);
 
                         Image image = e.IsBgra ? Image.LoadPixelData<Bgra32>(e.Data, e.Width, e.Height)
                                     : Image.LoadPixelData<Rgba32>(e.Data, e.Width, e.Height);
