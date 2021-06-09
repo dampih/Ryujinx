@@ -112,7 +112,7 @@ namespace Ryujinx.Graphics.OpenGL
             {
                 ScreenCaptureRequested = false;
 
-                CaptureFrame(srcX0, srcY0, srcX1, srcY1, view.Format.IsBgra8());
+                CaptureFrame(srcX0, srcY0, srcX1, srcY1, view.Format.IsBgra8(), crop.FlipX, crop.FlipY);
             }
 
             GL.BlitFramebuffer(
@@ -168,12 +168,12 @@ namespace Ryujinx.Graphics.OpenGL
             BackgroundContext = new BackgroundContextWorker(baseContext);
         }
 
-        public void CaptureFrame(int x, int y, int width, int height, bool isBgra)
+        public void CaptureFrame(int x, int y, int width, int height, bool isBgra, bool flipX, bool flipY)
         {
             long size = Math.Abs(4 * width * height);
             byte[] bitmap = new byte[size];
             GL.ReadPixels(x, y, width, height, isBgra ? PixelFormat.Bgra : PixelFormat.Rgba, PixelType.UnsignedByte, bitmap);
-            _renderer.OnScreenCaptured(new ScreenCaptureImageInfo(width, height, isBgra, bitmap));
+            _renderer.OnScreenCaptured(new ScreenCaptureImageInfo(width, height, isBgra, bitmap, flipX, flipY));
         }
 
         public void Dispose()
