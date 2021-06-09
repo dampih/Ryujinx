@@ -57,7 +57,7 @@
   "enable_keyboard": false,
   "hotkeys": {
     "toggle_vsync": "Tab",
-    "screen_shot": "F9"
+    "screen_shot": "F8"
   },
   "keyboard_config": [],
   "controller_config": [],
