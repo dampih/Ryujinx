@@ -38,6 +38,8 @@ namespace Ryujinx.Ui
         public Switch Device { get; private set; }
         public IRenderer Renderer { get; private set; }
 
+        public bool ScreenshotRequested{ get; set; }
+
         public static event EventHandler<StatusUpdatedEventArgs> StatusUpdatedEvent;
 
         private bool _isActive;
@@ -279,18 +281,21 @@ namespace Ryujinx.Ui
 
             if(Renderer != null)
             {
-                Renderer.ScreenCaptured += Renderer_ScreenshotSaved;
+                Renderer.ScreenCaptured += Renderer_ScreenCaptured;
             }
 
             NpadManager.Initialize(device, ConfigurationState.Instance.Hid.InputConfig, ConfigurationState.Instance.Hid.EnableKeyboard);
             TouchScreenManager.Initialize(device);
         }
 
-        private unsafe void Renderer_ScreenshotSaved(object sender, ScreenCaptureImageInfo e)
+        private unsafe void Renderer_ScreenCaptured(object sender, ScreenCaptureImageInfo e)
         {
             if (e.Data.Length > 0)
             {
-                string path = System.IO.Path.Combine(System.Environment.GetFolderPath(System.Environment.SpecialFolder.MyPictures), $"ryujinx-capture-{DateTime.Now}.png".Replace('/', '-').Replace(':', '-'));
+                var currentTime = DateTime.Now;
+                string filename = $"ryujinx_capture_{currentTime.Year}-{currentTime.Month:D2}-{currentTime.Day:D2}_{currentTime.Hour:D2}-{currentTime.Minute:D2}-{currentTime.Second:D2}.png";
+                string path = System.IO.Path.Combine(System.Environment.GetFolderPath(System.Environment.SpecialFolder.MyPictures),
+                    filename);
 
                 if (e.IsBgra)
                 {
@@ -516,9 +521,11 @@ namespace Ryujinx.Ui
                     Device.EnableDeviceVsync = !Device.EnableDeviceVsync;
                 }
 
-                if (currentHotkeyState.HasFlag(KeyboardHotkeyState.ScreenShot) &&
-                    !_prevHotkeyState.HasFlag(KeyboardHotkeyState.ScreenShot))
+                if ((currentHotkeyState.HasFlag(KeyboardHotkeyState.ScreenShot) &&
+                    !_prevHotkeyState.HasFlag(KeyboardHotkeyState.ScreenShot)) || ScreenshotRequested)
                 {
+                    ScreenshotRequested = false;
+
                     Renderer.ScreenShot();
                 }
 
