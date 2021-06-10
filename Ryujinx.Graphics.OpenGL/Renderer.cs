@@ -198,7 +198,7 @@ namespace Ryujinx.Graphics.OpenGL
             _sync.Wait(id);
         }
 
-        public void ScreenShot()
+        public void Screenshot()
         {
             _window.ScreenCaptureRequested = true;
         }

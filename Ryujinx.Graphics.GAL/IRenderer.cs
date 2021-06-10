@@ -47,6 +47,6 @@ namespace Ryujinx.Graphics.GAL
 
         void Initialize(GraphicsDebugLevel logLevel);
 
-        void ScreenShot();
+        void Screenshot();
     }
 }

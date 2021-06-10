@@ -12,11 +12,11 @@ namespace Ryujinx.Graphics.GAL
             FlipY  = flipY;
         }
 
-        public int Width { get; }
-        public int Height { get; }
-        public bool IsBgra{ get; }
-        public byte[] Data { get; }
-        public bool FlipX{ get; }
-        public bool FlipY{ get; }
+        public int    Width  { get; }
+        public int    Height { get; }
+        public byte[] Data   { get; }
+        public bool   IsBgra { get; }
+        public bool   FlipX  { get; }
+        public bool   FlipY  { get; }
     }
 }

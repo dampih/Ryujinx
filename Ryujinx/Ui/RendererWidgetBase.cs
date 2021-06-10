@@ -40,7 +40,7 @@ namespace Ryujinx.Ui
         public Switch Device { get; private set; }
         public IRenderer Renderer { get; private set; }
 
-        public bool ScreenshotRequested{ get; set; }
+        public bool ScreenshotRequested { get; set; }
 
         public static event EventHandler<StatusUpdatedEventArgs> StatusUpdatedEvent;
 
@@ -281,7 +281,7 @@ namespace Ryujinx.Ui
             Renderer = Device.Gpu.Renderer;
             Renderer?.Window.SetSize(_windowWidth, _windowHeight);
 
-            if(Renderer != null)
+            if (Renderer != null)
             {
                 Renderer.ScreenCaptured += Renderer_ScreenCaptured;
             }
@@ -298,20 +298,21 @@ namespace Ryujinx.Ui
                 {
                     lock (this)
                     {
-                        var currentTime  = DateTime.Now;
-                        string filename  = $"ryujinx_capture_{currentTime.Year}-{currentTime.Month:D2}-{currentTime.Day:D2}_{currentTime.Hour:D2}-{currentTime.Minute:D2}-{currentTime.Second:D2}.png";
-                        string directory = System.IO.Path.Combine(System.Environment.GetFolderPath(System.Environment.SpecialFolder.MyPictures), "Ryujinx");
-                        string path      = System.IO.Path.Combine(directory, filename);
+                        var    currentTime  = DateTime.Now;
+                        string filename     = $"ryujinx_capture_{currentTime.Year}-{currentTime.Month:D2}-{currentTime.Day:D2}_{currentTime.Hour:D2}-{currentTime.Minute:D2}-{currentTime.Second:D2}.png";
+                        string directory    = System.IO.Path.Combine(System.Environment.GetFolderPath(System.Environment.SpecialFolder.MyPictures), "Ryujinx");
+                        string path         = System.IO.Path.Combine(directory, filename);
 
                         Directory.CreateDirectory(directory);
 
                         Image image = e.IsBgra ? Image.LoadPixelData<Bgra32>(e.Data, e.Width, e.Height)
-                                    : Image.LoadPixelData<Rgba32>(e.Data, e.Width, e.Height);
+                                               : Image.LoadPixelData<Rgba32>(e.Data, e.Width, e.Height);
 
                         if (e.FlipX)
                         {
                             image.Mutate(x => x.Flip(FlipMode.Horizontal));
                         }
+
                         if (e.FlipY)
                         {
                             image.Mutate(x => x.Flip(FlipMode.Vertical));
@@ -324,7 +325,7 @@ namespace Ryujinx.Ui
 
                         image.Dispose();
 
-                        Logger.Notice.Print(LogClass.Application, $"ScreenShot saved to {path}", "Screenshot");
+                        Logger.Notice.Print(LogClass.Application, $"Screenshot saved to {path}", "Screenshot");
                     }
                 });
             }
@@ -529,12 +530,12 @@ namespace Ryujinx.Ui
                     Device.EnableDeviceVsync = !Device.EnableDeviceVsync;
                 }
 
-                if ((currentHotkeyState.HasFlag(KeyboardHotkeyState.ScreenShot) &&
-                    !_prevHotkeyState.HasFlag(KeyboardHotkeyState.ScreenShot)) || ScreenshotRequested)
+                if ((currentHotkeyState.HasFlag(KeyboardHotkeyState.Screenshot) &&
+                    !_prevHotkeyState.HasFlag(KeyboardHotkeyState.Screenshot)) || ScreenshotRequested)
                 {
                     ScreenshotRequested = false;
 
-                    Renderer.ScreenShot();
+                    Renderer.Screenshot();
                 }
 
                 _prevHotkeyState = currentHotkeyState;
@@ -564,7 +565,7 @@ namespace Ryujinx.Ui
         {
             None,
             ToggleVSync,
-            ScreenShot
+            Screenshot
         }
 
         private KeyboardHotkeyState GetHotkeyState()
@@ -576,9 +577,9 @@ namespace Ryujinx.Ui
                 state |= KeyboardHotkeyState.ToggleVSync;
             }
             
-            if (_keyboardInterface.IsPressed((Key)ConfigurationState.Instance.Hid.Hotkeys.Value.ScreenShot))
+            if (_keyboardInterface.IsPressed((Key)ConfigurationState.Instance.Hid.Hotkeys.Value.Screenshot))
             {
-                state |= KeyboardHotkeyState.ScreenShot;
+                state |= KeyboardHotkeyState.Screenshot;
             }
 
             return state;

@@ -1352,7 +1352,7 @@ namespace Ryujinx.Ui
 
         private void Take_Screenshot(object sender, EventArgs args)
         {
-            if(_emulationContext!=null && RendererWidget != null)
+            if (_emulationContext != null && RendererWidget != null)
             {
                 RendererWidget.ScreenshotRequested = true;
             }

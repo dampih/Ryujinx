@@ -535,7 +535,7 @@ namespace Ryujinx.Configuration
             Hid.Hotkeys.Value = new KeyboardHotkeys
             {
                 ToggleVsync = Key.Tab,
-                ScreenShot = Key.F8
+                Screenshot = Key.F8
             };
             Hid.InputConfig.Value = new List<InputConfig>
             {
@@ -836,7 +836,7 @@ namespace Ryujinx.Configuration
                 configurationFileFormat.Hotkeys = new KeyboardHotkeys
                 {
                     ToggleVsync = Key.Tab,
-                    ScreenShot = Key.F8
+                    Screenshot = Key.F8
                 };
 
                 configurationFileUpdated = true;
