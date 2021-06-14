@@ -1444,8 +1444,7 @@
       "title": "Hotkey Controls",
       "required": [
         "toggle_vsync",
-        "screenshot"
-        
+        "screenshot"        
       ],
       "properties": {
         "toggle_vsync": {
@@ -1458,7 +1457,7 @@
           "$id": "#/properties/hotkeys/properties/screenshot",
           "$ref": "#/definitions/key",
           "title": "Screenshot",
-          "default": "F9"
+          "default": "F8"
         }
       }
     },
