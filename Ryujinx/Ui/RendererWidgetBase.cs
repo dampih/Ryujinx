@@ -298,10 +298,10 @@ namespace Ryujinx.Ui
                 {
                     lock (this)
                     {
-                        var    currentTime  = DateTime.Now;
-                        string filename     = $"ryujinx_capture_{currentTime.Year}-{currentTime.Month:D2}-{currentTime.Day:D2}_{currentTime.Hour:D2}-{currentTime.Minute:D2}-{currentTime.Second:D2}.png";
-                        string directory    = System.IO.Path.Combine(System.Environment.GetFolderPath(System.Environment.SpecialFolder.MyPictures), "Ryujinx");
-                        string path         = System.IO.Path.Combine(directory, filename);
+                        var    currentTime = DateTime.Now;
+                        string filename    = $"ryujinx_capture_{currentTime.Year}-{currentTime.Month:D2}-{currentTime.Day:D2}_{currentTime.Hour:D2}-{currentTime.Minute:D2}-{currentTime.Second:D2}.png";
+                        string directory   = System.IO.Path.Combine(System.Environment.GetFolderPath(System.Environment.SpecialFolder.MyPictures), "Ryujinx");
+                        string path        = System.IO.Path.Combine(directory, filename);
 
                         Directory.CreateDirectory(directory);
 
