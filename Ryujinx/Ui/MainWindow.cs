@@ -1,9 +1,21 @@
+using System;
+using System.Diagnostics;
+using System.IO;
+using System.Reflection;
+using System.Runtime.InteropServices;
+using System.Threading;
+using System.Threading.Tasks;
+
 using ARMeilleure.Translation;
 using ARMeilleure.Translation.PTC;
+
 using Gtk;
+
 using LibHac.Common;
 using LibHac.FsSystem;
+using LibHac.FsSystem.NcaUtils;
 using LibHac.Ns;
+
 using Ryujinx.Audio.Backends.Dummy;
 using Ryujinx.Audio.Backends.OpenAL;
 using Ryujinx.Audio.Backends.SDL2;
@@ -30,13 +42,6 @@ using Ryujinx.Ui.Applet;
 using Ryujinx.Ui.Helper;
 using Ryujinx.Ui.Widgets;
 using Ryujinx.Ui.Windows;
-using System;
-using System.Diagnostics;
-using System.IO;
-using System.Reflection;
-using System.Runtime.InteropServices;
-using System.Threading;
-using System.Threading.Tasks;
 
 using GUI = Gtk.Builder.ObjectAttribute;
 
@@ -87,10 +92,15 @@ namespace Ryujinx.Ui
         [GUI] Box             _statusBar;
         [GUI] MenuItem        _optionMenu;
         [GUI] MenuItem        _manageUserProfiles;
+        [GUI] MenuItem        _fileMenu;
+        [GUI] MenuItem        _loadApplicationFile;
+        [GUI] MenuItem        _loadApplicationFolder;
+        [GUI] MenuItem        _appletMenu;
         [GUI] MenuItem        _actionMenu;
         [GUI] MenuItem        _stopEmulation;
         [GUI] MenuItem        _simulateWakeUpMessage;
         [GUI] MenuItem        _scanAmiibo;
+        [GUI] MenuItem        _takeScreenshot;
         [GUI] MenuItem        _fullScreen;
         [GUI] CheckMenuItem   _startFullScreen;
         [GUI] CheckMenuItem   _favToggle;
@@ -165,6 +175,7 @@ namespace Ryujinx.Ui
             _applicationLibrary.ApplicationAdded        += Application_Added;
             _applicationLibrary.ApplicationCountUpdated += ApplicationCount_Updated;
 
+            _fileMenu.StateChanged   += FileMenu_StateChanged;
             _actionMenu.StateChanged += ActionMenu_StateChanged;
             _optionMenu.StateChanged += OptionMenu_StateChanged;
 
@@ -575,7 +586,15 @@ namespace Ryujinx.Ui
 
                 SystemVersion firmwareVersion = _contentManager.GetCurrentFirmwareVersion();
 
-                bool isDirectory = Directory.Exists(path);
+                bool isDirectory     = Directory.Exists(path);
+                bool isFirmwareTitle = false;
+
+                if (path.StartsWith("@SystemContent"))
+                {
+                    path = _virtualFileSystem.SwitchPathToSystemPath(path);
+
+                    isFirmwareTitle = true;
+                }
 
                 if (!SetupValidator.CanStartApplication(_contentManager, path, out UserError userError))
                 {
@@ -636,7 +655,13 @@ namespace Ryujinx.Ui
 
                 Logger.Notice.Print(LogClass.Application, $"Using Firmware Version: {firmwareVersion?.VersionString}");
 
-                if (Directory.Exists(path))
+                if (isFirmwareTitle)
+                {
+                    Logger.Info?.Print(LogClass.Application, "Loading as Firmware Title (NCA).");
+
+                    _emulationContext.LoadNca(path);
+                }
+                else if (Directory.Exists(path))
                 {
                     string[] romFsFiles = Directory.GetFiles(path, "*.istorage");
 
@@ -1100,6 +1125,20 @@ namespace Ryujinx.Ui
             }
         }
 
+        private void FileMenu_StateChanged(object o, StateChangedArgs args)
+        {
+            _appletMenu.Sensitive            = _emulationContext == null && _contentManager.GetCurrentFirmwareVersion() != null && _contentManager.GetCurrentFirmwareVersion().Major > 3;
+            _loadApplicationFile.Sensitive   = _emulationContext == null;
+            _loadApplicationFolder.Sensitive = _emulationContext == null;
+        }
+
+        private void Load_Mii_Edit_Applet(object sender, EventArgs args)
+        {
+            string contentPath = _contentManager.GetInstalledContentPath(0x0100000000001009, StorageId.NandSystem, NcaContentType.Program);
+
+            LoadApplication(contentPath);
+        }
+
         private void Open_Ryu_Folder(object sender, EventArgs args)
         {
             OpenHelper.OpenFolder(AppDataManager.BaseDirPath);
@@ -1217,6 +1256,15 @@ namespace Ryujinx.Ui
 
                                     GtkDialog.CreateInfoDialog(dialogTitle, message);
                                     Logger.Info?.Print(LogClass.Application, message);
+
+                                    // Purge Applet Cache.
+
+                                    DirectoryInfo miiEditorCacheFolder = new DirectoryInfo(System.IO.Path.Combine(AppDataManager.GamesDirPath, "0100000000001009", "cache"));
+
+                                    if (miiEditorCacheFolder.Exists)
+                                    {
+                                        miiEditorCacheFolder.Delete(true);
+                                    }
                                 });
                             }
                             catch (Exception ex)
@@ -1334,7 +1382,8 @@ namespace Ryujinx.Ui
 
         private void ActionMenu_StateChanged(object o, StateChangedArgs args)
         {
-            _scanAmiibo.Sensitive = _emulationContext != null && _emulationContext.System.SearchingForAmiibo(out int _);
+            _scanAmiibo.Sensitive     = _emulationContext != null && _emulationContext.System.SearchingForAmiibo(out int _);
+            _takeScreenshot.Sensitive = _emulationContext != null;
         }
 
         private void Scan_Amiibo(object sender, EventArgs args)
@@ -1356,6 +1405,14 @@ namespace Ryujinx.Ui
             else
             {
                 GtkDialog.CreateInfoDialog($"Amiibo", "The game is currently not ready to receive Amiibo scan data. Ensure that you have an Amiibo-compatible game open and ready to receive Amiibo scan data.");
+            }
+        }
+
+        private void Take_Screenshot(object sender, EventArgs args)
+        {
+            if (_emulationContext != null && RendererWidget != null)
+            {
+                RendererWidget.ScreenshotRequested = true;
             }
         }
 
