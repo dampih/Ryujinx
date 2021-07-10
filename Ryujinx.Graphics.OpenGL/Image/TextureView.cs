@@ -138,6 +138,11 @@ namespace Ryujinx.Graphics.OpenGL.Image
                 }
             }
 
+            if (Format == Format.S8UintD24Unorm)
+            {
+                data = FormatConverter.ConvertD24S8ToS8D24(data);
+            }
+
             return data;
         }
 
@@ -237,6 +242,11 @@ namespace Ryujinx.Graphics.OpenGL.Image
 
         public void SetData(ReadOnlySpan<byte> data)
         {
+            if (Format == Format.S8UintD24Unorm)
+            {
+                data = FormatConverter.ConvertS8D24ToD24S8(data);
+            }
+
             unsafe
             {
                 fixed (byte* ptr = data)
@@ -248,6 +258,11 @@ namespace Ryujinx.Graphics.OpenGL.Image
 
         public void SetData(ReadOnlySpan<byte> data, int layer, int level)
         {
+            if (Format == Format.S8UintD24Unorm)
+            {
+                data = FormatConverter.ConvertS8D24ToD24S8(data);
+            }
+
             unsafe
             {
                 fixed (byte* ptr = data)
