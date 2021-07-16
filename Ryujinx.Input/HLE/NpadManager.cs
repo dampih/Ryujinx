@@ -3,6 +3,7 @@ using Ryujinx.Common.Configuration.Hid.Controller;
 using Ryujinx.Common.Configuration.Hid.Keyboard;
 using Ryujinx.HLE.HOS.Services.Hid;
 using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Runtime.CompilerServices;
@@ -166,6 +167,7 @@ namespace Ryujinx.Input.HLE
                     SixAxisInput motionState = default;
 
                     NpadController controller = _controllers[(int)inputConfig.PlayerIndex];
+                    Ryujinx.HLE.HOS.Services.Hid.PlayerIndex playerIndex = (Ryujinx.HLE.HOS.Services.Hid.PlayerIndex)inputConfig.PlayerIndex;
 
                     // Do we allow input updates and is a controller connected?
                     if (!_blockInputUpdates && controller != null)
@@ -174,6 +176,12 @@ namespace Ryujinx.Input.HLE
 
                         controller.UpdateUserConfiguration(inputConfig);
                         controller.Update();
+                        if (!_device.Hid.Npads.RumbleQueues.TryGetValue(playerIndex, out ConcurrentQueue<(HidVibrationValue, HidVibrationValue)> rumbleQueue))
+                        {
+                            rumbleQueue = new ConcurrentQueue<(HidVibrationValue, HidVibrationValue)>();
+                            _device.Hid.Npads.RumbleQueues[playerIndex] = rumbleQueue;
+                        }
+                        controller.UpdateRumble(rumbleQueue);
 
                         inputState = controller.GetHLEInputState();
 
@@ -192,8 +200,8 @@ namespace Ryujinx.Input.HLE
                         motionState.Orientation = new float[9];
                     }
 
-                    inputState.PlayerId = (Ryujinx.HLE.HOS.Services.Hid.PlayerIndex)inputConfig.PlayerIndex;
-                    motionState.PlayerId = (Ryujinx.HLE.HOS.Services.Hid.PlayerIndex)inputConfig.PlayerIndex;
+                    inputState.PlayerId = playerIndex;
+                    motionState.PlayerId = playerIndex;
 
                     hleInputStates.Add(inputState);
                     hleMotionStates.Add(motionState);
