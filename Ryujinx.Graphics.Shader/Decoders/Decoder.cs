@@ -316,13 +316,13 @@ namespace Ryujinx.Graphics.Shader.Decoders
                     {
                         int index = (attr - AttributeConsts.UserAttributeBase) / 16;
 
-                        if (opAttr.Emitter == InstEmit.Ast)
+                        if (opAttr.Emitter == InstEmit.Ast || opAttr.Output)
                         {
-                            config.SetOutputUserAttribute(index);
+                            config.SetOutputUserAttribute(index, opAttr.Patch);
                         }
                         else
                         {
-                            config.SetInputUserAttribute(index);
+                            config.SetInputUserAttribute(index, opAttr.Patch);
                         }
                     }
                 }

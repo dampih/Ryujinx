@@ -51,19 +51,33 @@ namespace Ryujinx.Graphics.Shader.Instructions
 
                     context.Config.SetUsedFeature(FeatureFlags.IaIndexing);
                 }
-                else if (op.Rc.IsRZ)
+                else if (op.Rc.IsRZ || op.Patch)
                 {
-                    Operand src = Attribute(op.AttributeOffset + index * 4);
+                    int offset = op.AttributeOffset + index * 4;
 
-                    context.FlagAttributeRead(src.Value);
+                    context.FlagAttributeRead(offset);
+
+                    if (op.Output)
+                    {
+                        offset |= AttributeConsts.LoadOutputMask;
+                    }
+
+                    Operand src = op.Patch ? AttributePerPatch(offset) : Attribute(offset);
 
                     context.Copy(Register(rd), src);
                 }
                 else
                 {
-                    Operand src = Const(op.AttributeOffset + index * 4);
+                    int offset = op.AttributeOffset + index * 4;
 
-                    context.FlagAttributeRead(src.Value);
+                    context.FlagAttributeRead(offset);
+
+                    if (op.Output)
+                    {
+                        offset |= AttributeConsts.LoadOutputMask;
+                    }
+
+                    Operand src = Const(offset);
 
                     context.Copy(Register(rd), context.LoadAttribute(src, Const(0), primVertex));
                 }
@@ -94,9 +108,13 @@ namespace Ryujinx.Graphics.Shader.Instructions
                 }
                 else
                 {
-                    Operand dest = Attribute(op.AttributeOffset + index * 4);
+                    // TODO: Support indirect stores using Ra.
 
-                    context.FlagAttributeWritten(dest.Value);
+                    int offset = op.AttributeOffset + index * 4;
+
+                    context.FlagAttributeWritten(offset);
+
+                    Operand dest = op.Patch ? AttributePerPatch(offset) : Attribute(offset);
 
                     context.Copy(dest, Register(rd));
                 }

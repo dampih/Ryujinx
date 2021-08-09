@@ -231,6 +231,7 @@ namespace Ryujinx.Graphics.Shader.Decoders
             Set("1101111101010x", InstEmit.TxqB,    OpCodeTex.Create);
             Set("01011111xxxxxx", InstEmit.Vmad,    OpCodeVideo.Create);
             Set("0011101xxxxxxx", InstEmit.Vmnmx,   OpCodeVideo.Create);
+            Set("0101000011110x", InstEmit.Vsetp,   OpCodeVideoSet.Create);
             Set("0101000011011x", InstEmit.Vote,    OpCodeVote.Create);
             Set("0100111xxxxxxx", InstEmit.Xmad,    OpCodeAluCbuf.Create);
             Set("0011011x00xxxx", InstEmit.Xmad,    OpCodeAluImm.Create);
