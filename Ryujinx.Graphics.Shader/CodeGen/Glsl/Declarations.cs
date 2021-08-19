@@ -177,11 +177,14 @@ namespace Ryujinx.Graphics.Shader.CodeGen.Glsl
                     }
 
                     DeclareSupportUniformBlock(context, isFragment, scaleElements);
-
-                    if (context.Config.UsedFeatures.HasFlag(FeatureFlags.IntegerSampling))
+                    if (scaleElements > 0)
                     {
-                        AppendHelperFunction(context, $"Ryujinx.Graphics.Shader/CodeGen/Glsl/HelperFunctions/TexelFetchScale_{stage}.glsl");
-                        context.AppendLine();
+                        context.AppendLine($"uniform float {stage}_renderScale[{scaleElements}];");
+                        if (context.Config.UsedFeatures.HasFlag(FeatureFlags.IntegerSampling))
+                        {
+                            AppendHelperFunction(context, $"Ryujinx.Graphics.Shader/CodeGen/Glsl/HelperFunctions/TexelFetchScale_{stage}.glsl");
+                            context.AppendLine();
+                        }
                     }
                 }
                 else if (isFragment)
@@ -251,11 +254,11 @@ namespace Ryujinx.Graphics.Shader.CodeGen.Glsl
             switch (type)
             {
                 case VariableType.Bool: return "bool";
-                case VariableType.F32:  return "precise float";
-                case VariableType.F64:  return "double";
+                case VariableType.F32: return "precise float";
+                case VariableType.F64: return "double";
                 case VariableType.None: return "void";
-                case VariableType.S32:  return "int";
-                case VariableType.U32:  return "uint";
+                case VariableType.S32: return "int";
+                case VariableType.U32: return "uint";
             }
 
             throw new ArgumentException($"Invalid variable type \"{type}\".");
