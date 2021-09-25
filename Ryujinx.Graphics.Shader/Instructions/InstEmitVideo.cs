@@ -121,6 +121,63 @@ namespace Ryujinx.Graphics.Shader.Instructions
             context.Copy(GetDest(context), res);
         }
 
+        public static void Vsetp(EmitterContext context)
+        {
+            OpCodeVideoSet op = (OpCodeVideoSet)context.CurrOp;
+
+            Operand srcA = Extend(context, GetSrcA(context), op.RaSelection, op.RaType);
+
+            Operand srcB;
+
+            if (op.HasRb)
+            {
+                srcB = Extend(context, Register(op.Rb), op.RbSelection, op.RbType);
+            }
+            else
+            {
+                srcB = Const(op.Immediate >> 4); // This instruction has a 16-bit immediate.
+            }
+
+            IntegerCondition cmpOp = (IntegerCondition)(op.RawOpCode.Extract(43, 2) | (op.RawOpCode.Extract(47) ? 4 : 0));
+
+            Operand p0Res;
+
+            bool signedA = (op.RaType & VideoType.Signed) != 0;
+            bool signedB = (op.RbType & VideoType.Signed) != 0;
+
+            if (signedA != signedB)
+            {
+                bool a32 = (op.RaType & ~VideoType.Signed) == VideoType.U32;
+                bool b32 = (op.RbType & ~VideoType.Signed) == VideoType.U32;
+
+                if (!a32 && !b32)
+                {
+                    // Both values are extended small integer and can always fit in a S32, just do a signed comparison.
+                    p0Res = GetIntComparison(context, cmpOp, srcA, srcB, isSigned: true, extended: false);
+                }
+                else
+                {
+                    // TODO: Mismatching sign case.
+                    p0Res = Const(0);
+                }
+            }
+            else
+            {
+                // Sign matches, just do a regular comparison.
+                p0Res = GetIntComparison(context, cmpOp, srcA, srcB, signedA, extended: false);
+            }
+
+            Operand p1Res = context.BitwiseNot(p0Res);
+
+            Operand pred = GetPredicate39(context);
+
+            p0Res = InstEmitAluHelper.GetPredLogicalOp(context, op.LogicalOp, p0Res, pred);
+            p1Res = InstEmitAluHelper.GetPredLogicalOp(context, op.LogicalOp, p1Res, pred);
+
+            context.Copy(Register(op.Predicate3), p0Res);
+            context.Copy(Register(op.Predicate0), p1Res);
+        }
+
         private static Operand Extend(EmitterContext context, Operand src, int sel, VideoType type)
         {
             return type switch

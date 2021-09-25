@@ -176,7 +176,7 @@ namespace Ryujinx.Graphics.Shader.CodeGen.Glsl.Instructions
                 {
                     texCall = "int(" + texCall + ")";
                 }
-            } 
+            }
             else
             {
                 texCall += ")" + (texOp.Inst == Instruction.ImageLoad ? GetMask(texOp.Index) : "");
@@ -200,7 +200,8 @@ namespace Ryujinx.Graphics.Shader.CodeGen.Glsl.Instructions
 
             if (src2 is AstOperand operand && operand.Type == OperandType.Constant)
             {
-                return OperandManager.GetAttributeName(baseAttr.Value + (operand.Value << 2), context.Config, isOutAttr: false, indexExpr);
+                int attrOffset = baseAttr.Value + (operand.Value << 2);
+                return OperandManager.GetAttributeName(attrOffset, context.Config, perPatch: false, isOutAttr: false, indexExpr);
             }
             else
             {
@@ -326,7 +327,8 @@ namespace Ryujinx.Graphics.Shader.CodeGen.Glsl.Instructions
 
             if (src2 is AstOperand operand && operand.Type == OperandType.Constant)
             {
-                attrName = OperandManager.GetAttributeName(baseAttr.Value + (operand.Value << 2), context.Config, isOutAttr: true);
+                int attrOffset = baseAttr.Value + (operand.Value << 2);
+                attrName = OperandManager.GetAttributeName(attrOffset, context.Config, perPatch: false, isOutAttr: true);
             }
             else
             {

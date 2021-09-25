@@ -58,18 +58,39 @@ namespace Ryujinx.Graphics.Shader.Instructions
 
             switch (sysReg)
             {
-                case SystemRegister.LaneId: src = Attribute(AttributeConsts.LaneId); break;
-
-                // TODO: Use value from Y direction GPU register.
-                case SystemRegister.YDirection: src = ConstF(1); break;
-
-                case SystemRegister.ThreadKill: src = context.Config.Stage == ShaderStage.Fragment
-                    ? Attribute(AttributeConsts.ThreadKill)
-                    : Const(0);
+                case SystemRegister.LaneId:
+                    src = Attribute(AttributeConsts.LaneId);
                     break;
 
-                case SystemRegister.ThreadId:
-                {
+                case SystemRegister.InvocationId:
+                    src = Attribute(AttributeConsts.InvocationId);
+                    break;
+
+                case SystemRegister.YDirection:
+                    src = ConstF(1); // TODO: Use value from Y direction GPU register.
+                    break;
+
+                case SystemRegister.ThreadKill:
+                    src = context.Config.Stage == ShaderStage.Fragment ? Attribute(AttributeConsts.ThreadKill) : Const(0);
+                    break;
+
+                case SystemRegister.InvocationInfo:
+                    if (context.Config.Stage != ShaderStage.Compute && context.Config.Stage != ShaderStage.Fragment)
+                    {
+                        Operand primitiveId = Attribute(AttributeConsts.PrimitiveId);
+                        Operand patchVerticesIn = Attribute(AttributeConsts.PatchVerticesIn);
+
+                        patchVerticesIn = context.ShiftLeft(patchVerticesIn, Const(16));
+
+                        src = context.BitwiseOr(primitiveId, patchVerticesIn);
+                    }
+                    else
+                    {
+                        src = Const(0);
+                    }
+                    break;
+
+                case SystemRegister.TId:
                     Operand tidX = Attribute(AttributeConsts.ThreadIdX);
                     Operand tidY = Attribute(AttributeConsts.ThreadIdY);
                     Operand tidZ = Attribute(AttributeConsts.ThreadIdZ);
@@ -78,23 +99,47 @@ namespace Ryujinx.Graphics.Shader.Instructions
                     tidZ = context.ShiftLeft(tidZ, Const(26));
 
                     src = context.BitwiseOr(tidX, context.BitwiseOr(tidY, tidZ));
-
                     break;
-                }
 
-                case SystemRegister.ThreadIdX: src = Attribute(AttributeConsts.ThreadIdX); break;
-                case SystemRegister.ThreadIdY: src = Attribute(AttributeConsts.ThreadIdY); break;
-                case SystemRegister.ThreadIdZ: src = Attribute(AttributeConsts.ThreadIdZ); break;
-                case SystemRegister.CtaIdX:    src = Attribute(AttributeConsts.CtaIdX);    break;
-                case SystemRegister.CtaIdY:    src = Attribute(AttributeConsts.CtaIdY);    break;
-                case SystemRegister.CtaIdZ:    src = Attribute(AttributeConsts.CtaIdZ);    break;
-                case SystemRegister.EqMask:    src = Attribute(AttributeConsts.EqMask);    break;
-                case SystemRegister.LtMask:    src = Attribute(AttributeConsts.LtMask);    break;
-                case SystemRegister.LeMask:    src = Attribute(AttributeConsts.LeMask);    break;
-                case SystemRegister.GtMask:    src = Attribute(AttributeConsts.GtMask);    break;
-                case SystemRegister.GeMask:    src = Attribute(AttributeConsts.GeMask);    break;
+                case SystemRegister.TIdX:
+                    src = Attribute(AttributeConsts.ThreadIdX);
+                    break;
+                case SystemRegister.TIdY:
+                    src = Attribute(AttributeConsts.ThreadIdY);
+                    break;
+                case SystemRegister.TIdZ:
+                    src = Attribute(AttributeConsts.ThreadIdZ);
+                    break;
 
-                default: src = Const(0); break;
+                case SystemRegister.CtaIdX:
+                    src = Attribute(AttributeConsts.CtaIdX);
+                    break;
+                case SystemRegister.CtaIdY:
+                    src = Attribute(AttributeConsts.CtaIdY);
+                    break;
+                case SystemRegister.CtaIdZ:
+                    src = Attribute(AttributeConsts.CtaIdZ);
+                    break;
+
+                case SystemRegister.EqMask:
+                    src = Attribute(AttributeConsts.EqMask);
+                    break;
+                case SystemRegister.LtMask:
+                    src = Attribute(AttributeConsts.LtMask);
+                    break;
+                case SystemRegister.LeMask:
+                    src = Attribute(AttributeConsts.LeMask);
+                    break;
+                case SystemRegister.GtMask:
+                    src = Attribute(AttributeConsts.GtMask);
+                    break;
+                case SystemRegister.GeMask:
+                    src = Attribute(AttributeConsts.GeMask);
+                    break;
+
+                default:
+                    src = Const(0);
+                    break;
             }
 
             context.Copy(GetDest(context), src);

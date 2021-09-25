@@ -6,6 +6,7 @@ namespace Ryujinx.Graphics.Shader.Decoders
     {
         public int  AttributeOffset { get; }
         public bool Patch           { get; }
+        public bool Output          { get; }
         public int  Count           { get; }
 
         public bool Phys => !Patch && AttributeOffset == 0 && !Ra.IsRZ;
@@ -17,6 +18,7 @@ namespace Ryujinx.Graphics.Shader.Decoders
         {
             AttributeOffset = opCode.Extract(20, 10);
             Patch           = opCode.Extract(31);
+            Output          = opCode.Extract(32);
             Count           = opCode.Extract(47, 2) + 1;
         }
     }

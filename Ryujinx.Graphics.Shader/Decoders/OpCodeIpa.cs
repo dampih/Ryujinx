@@ -5,6 +5,8 @@ namespace Ryujinx.Graphics.Shader.Decoders
     class OpCodeIpa : OpCodeAluReg, IOpCodeAttribute
     {
         public int AttributeOffset { get; }
+        public bool Patch => false;
+        public bool Output => false;
         public int Count => 1;
 
         public bool Idx { get; }
