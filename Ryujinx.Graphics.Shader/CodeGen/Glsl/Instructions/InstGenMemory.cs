@@ -81,7 +81,7 @@ namespace Ryujinx.Graphics.Shader.CodeGen.Glsl.Instructions
 
             string ApplyScaling(string vector)
             {
-                if ((context.Config.Stage == ShaderStage.Fragment || context.Config.Stage == ShaderStage.Compute) &&
+                if ((context.Config.Stage.SupportsRenderScale()) &&
                     texOp.Inst == Instruction.ImageLoad &&
                     !isBindless &&
                     !isIndexed)
@@ -617,7 +617,7 @@ namespace Ryujinx.Graphics.Shader.CodeGen.Glsl.Instructions
             {
                 if (intCoords)
                 {
-                    if ((context.Config.Stage == ShaderStage.Fragment || context.Config.Stage == ShaderStage.Compute) &&
+                    if ((context.Config.Stage.SupportsRenderScale()) &&
                         !isBindless &&
                         !isIndexed)
                     {
@@ -766,7 +766,7 @@ namespace Ryujinx.Graphics.Shader.CodeGen.Glsl.Instructions
             {
                 string texCall = $"textureSize({samplerName}, {lodExpr}){GetMask(texOp.Index)}";
 
-                if ((context.Config.Stage == ShaderStage.Fragment || context.Config.Stage == ShaderStage.Compute) &&
+                if (context.Config.Stage.SupportsRenderScale() &&
                     !isBindless &&
                     !isIndexed)
                 {
