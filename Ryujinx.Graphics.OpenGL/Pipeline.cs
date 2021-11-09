@@ -45,6 +45,7 @@ namespace Ryujinx.Graphics.OpenGL
 
         private Vector4<int>[] _fpIsBgra = new Vector4<int>[SupportBuffer.FragmentIsBgraCount];
         private Vector4<float>[] _renderScale = new Vector4<float>[65];
+        private int _fragmentScaleCount;
 
         private TextureBase _unit0Texture;
 
@@ -93,7 +94,7 @@ namespace Ryujinx.Graphics.OpenGL
             GL.BindBufferBase(BufferRangeTarget.UniformBuffer, 0, Unsafe.As<BufferHandle, int>(ref _supportBuffer));
 
             SetSupportBufferData<Vector4<int>>(SupportBuffer.FragmentIsBgraOffset, _fpIsBgra, SupportBuffer.FragmentIsBgraCount);
-            SetSupportBufferData<Vector4<float>>(SupportBuffer.FragmentRenderScaleOffset, _renderScale, SupportBuffer.RenderScaleMaxCount);
+            SetSupportBufferData<Vector4<float>>(SupportBuffer.GraphicsRenderScaleOffset, _renderScale, SupportBuffer.RenderScaleMaxCount);
         }
 
         public void Barrier()
@@ -960,7 +961,7 @@ namespace Ryujinx.Graphics.OpenGL
         public void SetRenderTargetScale(float scale)
         {
             _renderScale[0].X = scale;
-            SetSupportBufferData<Vector4<float>>(SupportBuffer.FragmentRenderScaleOffset, _renderScale, 1); // Just the first element.
+            SetSupportBufferData<Vector4<float>>(SupportBuffer.GraphicsRenderScaleOffset, _renderScale, 1); // Just the first element.
         }
 
         public void SetRenderTargetColorMasks(ReadOnlySpan<uint> componentMasks)
@@ -1296,16 +1297,11 @@ namespace Ryujinx.Graphics.OpenGL
             return (_boundDrawFramebuffer, _boundReadFramebuffer);
         }
 
-        public void UpdateRenderScale(ShaderStage stage, ReadOnlySpan<float> scales, int textureCount, int imageCount)
+        public void UpdateRenderScale(ReadOnlySpan<float> scales, int totalCount, int fragmentCount)
         {
-            if (stage != ShaderStage.Compute && stage != ShaderStage.Fragment)
-            {
-                return;
-            }
-
             bool changed = false;
 
-            for (int index = 0; index < textureCount + imageCount; index++)
+            for (int index = 0; index < totalCount; index++)
             {
                 if (_renderScale[1 + index].X != scales[index])
                 {
@@ -1314,9 +1310,16 @@ namespace Ryujinx.Graphics.OpenGL
                 }
             }
 
+            // Only update fragment count if there are scales after it for the vertex stage.
+            if (fragmentCount != totalCount && fragmentCount != _fragmentScaleCount)
+            {
+                _fragmentScaleCount = fragmentCount;
+                SetSupportBufferData<int>(SupportBuffer.FragmentRenderScaleCount, MemoryMarshal.CreateSpan(ref _fragmentScaleCount, 1), 1);
+            }
+
             if (changed)
             {
-                SetSupportBufferData<Vector4<float>>(SupportBuffer.FragmentRenderScaleOffset, _renderScale, 1 + textureCount + imageCount);
+                SetSupportBufferData<Vector4<float>>(SupportBuffer.GraphicsRenderScaleOffset, _renderScale, 1 + totalCount);
             }
         }
 
