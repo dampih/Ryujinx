@@ -40,6 +40,7 @@ namespace Ryujinx.Graphics.Gpu.Engine.Threed
                 { nameof(ThreedClassState.LoadBlendUcodeStart), new RwCallback(LoadBlendUcodeStart, null) },
                 { nameof(ThreedClassState.LoadBlendUcodeInstruction), new RwCallback(LoadBlendUcodeInstruction, null) },
                 { nameof(ThreedClassState.TextureBarrierTiled), new RwCallback(TextureBarrierTiled, null) },
+                { nameof(ThreedClassState.DrawTextureSrcY), new RwCallback(DrawTexture, null) },
                 { nameof(ThreedClassState.VbElementU8), new RwCallback(VbElementU8, null) },
                 { nameof(ThreedClassState.VbElementU16), new RwCallback(VbElementU16, null) },
                 { nameof(ThreedClassState.VbElementU32), new RwCallback(VbElementU32, null) },
@@ -272,6 +273,15 @@ namespace Ryujinx.Graphics.Gpu.Engine.Threed
         private void TextureBarrierTiled(int argument)
         {
             _context.Renderer.Pipeline.TextureBarrierTiled();
+        }
+
+        /// <summary>
+        /// Draws a texture, without needing to specify shader programs.
+        /// </summary>
+        /// <param name="argument">Method call argument</param>
+        private void DrawTexture(int argument)
+        {
+            _drawManager.DrawTexture(this, argument);
         }
 
         /// <summary>
