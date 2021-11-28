@@ -95,6 +95,7 @@ namespace Ryujinx.Graphics.Gpu.Image
         private Target   _arrayViewTarget;
 
         private ITexture _flushHostTexture;
+        private ITexture _setHostTexture;
 
         private Texture _viewStorage;
 
@@ -525,9 +526,10 @@ namespace Ryujinx.Graphics.Gpu.Image
         /// Copy the host texture to a scaled one. If a texture is not provided, create it with the given scale.
         /// </summary>
         /// <param name="scale">Scale factor</param>
+        /// <param name="copy">True if the data should be copied to the texture, false otherwise</param>
         /// <param name="storage">Texture to use instead of creating one</param>
         /// <returns>A host texture containing a scaled version of this texture</returns>
-        private ITexture GetScaledHostTexture(float scale, ITexture storage = null)
+        private ITexture GetScaledHostTexture(float scale, bool copy, ITexture storage = null)
         {
             if (storage == null)
             {
@@ -535,7 +537,10 @@ namespace Ryujinx.Graphics.Gpu.Image
                 storage = _context.Renderer.CreateTexture(createInfo, scale);
             }
 
-            HostTexture.CopyTo(storage, new Extents2D(0, 0, HostTexture.Width, HostTexture.Height), new Extents2D(0, 0, storage.Width, storage.Height), true);
+            if (copy)
+            {
+                HostTexture.CopyTo(storage, new Extents2D(0, 0, HostTexture.Width, HostTexture.Height), new Extents2D(0, 0, storage.Width, storage.Height), true);
+            }
 
             return storage;
         }
@@ -566,7 +571,7 @@ namespace Ryujinx.Graphics.Gpu.Image
 
                 ScaleFactor = scale;
 
-                ITexture newStorage = GetScaledHostTexture(ScaleFactor);
+                ITexture newStorage = GetScaledHostTexture(ScaleFactor, true);
 
                 Logger.Debug?.Print(LogClass.Gpu, $"  Copy performed: {HostTexture.Width}x{HostTexture.Height} to {newStorage.Width}x{newStorage.Height}");
 
@@ -655,11 +660,6 @@ namespace Ryujinx.Graphics.Gpu.Image
         /// </summary>
         public void SynchronizeFull()
         {
-            if (_hasData)
-            {
-                BlacklistScale();
-            }
-
             ReadOnlySpan<byte> data = _physicalMemory.GetSpan(Range);
 
             IsModified = false;
@@ -687,7 +687,19 @@ namespace Ryujinx.Graphics.Gpu.Image
 
             data = ConvertToHostCompatibleFormat(data);
 
-            HostTexture.SetData(data);
+            if (ScaleFactor != 1f)
+            {
+                // If needed, create a texture to load from 1x scale.
+                ITexture texture = _setHostTexture = GetScaledHostTexture(1f, false, _setHostTexture);
+
+                texture.SetData(data);
+
+                texture.CopyTo(HostTexture, new Extents2D(0, 0, texture.Width, texture.Height), new Extents2D(0, 0, HostTexture.Width, HostTexture.Height), true);
+            }
+            else
+            {
+                HostTexture.SetData(data);
+            }
 
             _hasData = true;
         }
@@ -858,7 +870,7 @@ namespace Ryujinx.Graphics.Gpu.Image
                 if (ScaleFactor != 1f)
                 {
                     // If needed, create a texture to flush back to host at 1x scale.
-                    texture = _flushHostTexture = GetScaledHostTexture(1f, _flushHostTexture);
+                    texture = _flushHostTexture = GetScaledHostTexture(1f, true, _flushHostTexture);
                 }
 
                 FlushTextureDataToGuest(false, texture);
@@ -1451,6 +1463,9 @@ namespace Ryujinx.Graphics.Gpu.Image
 
             _flushHostTexture?.Release();
             _flushHostTexture = null;
+
+            _setHostTexture?.Release();
+            _setHostTexture = null;
         }
 
         /// <summary>
