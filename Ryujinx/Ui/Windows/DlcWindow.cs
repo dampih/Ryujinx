@@ -38,7 +38,7 @@ namespace Ryujinx.Ui.Windows
 
             _titleId                 = titleId;
             _virtualFileSystem       = virtualFileSystem;
-            _dlcJsonPath             = System.IO.Path.Combine(AppDataManager.GamesDirPath, _titleId, "dlc.json");
+            _dlcJsonPath             = GetDLCJsonPath(_titleId);
             _baseTitleInfoLabel.Text = $"DLC Available for {titleName} [{titleId.ToUpper()}]";
 
             try
@@ -104,6 +104,11 @@ namespace Ryujinx.Ui.Windows
                     TreeIter parentIter = ((TreeStore)_dlcTreeView.Model).AppendValues(false, "", $"(MISSING) {dlcContainer.Path}");
                 }
             }
+        }
+
+        public static string GetDLCJsonPath(string titleId)
+        {
+            return System.IO.Path.Combine(AppDataManager.GamesDirPath, titleId, "dlc.json");
         }
 
         private Nca TryCreateNca(IStorage ncaStorage, string containerPath)
