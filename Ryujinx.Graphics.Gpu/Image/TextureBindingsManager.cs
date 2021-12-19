@@ -408,7 +408,6 @@ namespace Ryujinx.Graphics.Gpu.Image
                         {
                             hostTexture = texture?.GetTargetTexture(bindingInfo.Target);
                         }
-
                         _textureState[stageIndex][index].Texture = hostTexture;
 
                         _context.Renderer.Pipeline.SetTexture(bindingInfo.Binding, hostTexture);
@@ -421,7 +420,6 @@ namespace Ryujinx.Graphics.Gpu.Image
                     if (_textureState[stageIndex][index].Sampler != hostSampler || _rebind)
                     {
                         _textureState[stageIndex][index].Sampler = hostSampler;
-
                         _context.Renderer.Pipeline.SetSampler(bindingInfo.Binding, hostSampler);
                     }
                 }
