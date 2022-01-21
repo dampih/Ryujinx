@@ -55,6 +55,11 @@ namespace Ryujinx.Graphics.Gpu.Shader
             };
         }
 
+        /// Queries host support for texture formats with BGRA component order (such as BGRA8).
+        /// </summary>
+        /// <returns>True if BGRA formats are supported, false otherwise</returns>
+        public bool QueryHostSupportsBgraFormat() => _context.Capabilities.SupportsBgraFormat;
+
         /// <summary>
         /// Queries host support for fragment shader ordering critical sections on the shader code.
         /// </summary>

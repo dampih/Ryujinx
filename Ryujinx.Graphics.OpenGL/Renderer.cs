@@ -105,6 +105,7 @@ namespace Ryujinx.Graphics.OpenGL
                 hasVectorIndexingBug: HwCapabilities.Vendor == HwCapabilities.GpuVendor.AmdWindows,
                 supportsAstcCompression: HwCapabilities.SupportsAstcCompression,
                 supports3DTextureCompression: false,
+                supportsBgraFormat: false,
                 supportsR4G4Format: false,
                 supportsFragmentShaderInterlock: HwCapabilities.SupportsFragmentShaderInterlock,
                 supportsFragmentShaderOrderingIntel: HwCapabilities.SupportsFragmentShaderOrdering,
