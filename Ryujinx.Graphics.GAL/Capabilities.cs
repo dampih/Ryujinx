@@ -28,7 +28,6 @@ namespace Ryujinx.Graphics.GAL
         public readonly int MaximumSupportedTessEvaluationUniforms;
         public readonly int MaximumSupportedGeometryUniforms;
         public readonly int MaximumSupportedFragmentUniforms;
-        public readonly int StorageBufferOffsetAlignment;
 
         public Capabilities(
             bool hasFrontFacingBug,
