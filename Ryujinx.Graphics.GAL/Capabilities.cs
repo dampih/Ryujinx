@@ -22,6 +22,13 @@ namespace Ryujinx.Graphics.GAL
         public readonly int MaximumComputeSharedMemorySize;
         public readonly float MaximumSupportedAnisotropy;
         public readonly int StorageBufferOffsetAlignment;
+        public readonly int MaximumSupportedComputeUniforms;
+        public readonly int MaximumSupportedVertexUniforms;
+        public readonly int MaximumSupportedTessControlUniforms;
+        public readonly int MaximumSupportedTessEvaluationUniforms;
+        public readonly int MaximumSupportedGeometryUniforms;
+        public readonly int MaximumSupportedFragmentUniforms;
+        public readonly int StorageBufferOffsetAlignment;
 
         public Capabilities(
             bool hasFrontFacingBug,
@@ -41,6 +48,12 @@ namespace Ryujinx.Graphics.GAL
             bool supportsIndirectParameters,
             int maximumComputeSharedMemorySize,
             float maximumSupportedAnisotropy,
+            int maximumSupportedComputeUniforms,
+            int maximumSupportedVertexUniforms,
+            int maximumSupportedTessControlUniforms,
+            int maximumSupportedTessEvaluationUniforms,
+            int maximumSupportedGeometryUniforms,
+            int maximumSupportedFragmentUniforms,
             int storageBufferOffsetAlignment)
         {
             HasFrontFacingBug = hasFrontFacingBug;
@@ -60,6 +73,12 @@ namespace Ryujinx.Graphics.GAL
             SupportsIndirectParameters = supportsIndirectParameters;
             MaximumComputeSharedMemorySize = maximumComputeSharedMemorySize;
             MaximumSupportedAnisotropy = maximumSupportedAnisotropy;
+            MaximumSupportedComputeUniforms = maximumSupportedComputeUniforms;
+            MaximumSupportedVertexUniforms = maximumSupportedVertexUniforms;
+            MaximumSupportedTessControlUniforms = maximumSupportedTessControlUniforms;
+            MaximumSupportedTessEvaluationUniforms = maximumSupportedTessEvaluationUniforms;
+            MaximumSupportedGeometryUniforms = maximumSupportedGeometryUniforms;
+            MaximumSupportedFragmentUniforms = maximumSupportedFragmentUniforms;
             StorageBufferOffsetAlignment = storageBufferOffsetAlignment;
         }
     }
