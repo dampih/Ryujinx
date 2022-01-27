@@ -24,19 +24,9 @@ jobs:
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
-        os: [ubuntu-latest, macOS-latest, windows-latest]
-        configuration: [Debug, Release]
+        os: [windows-latest]
+        configuration: [Release]
         include:
-        - os: ubuntu-latest
-          OS_NAME: Linux x64
-          DOTNET_RUNTIME_IDENTIFIER: linux-x64
-          RELEASE_ZIP_OS_NAME: linux_x64
-
-        - os: macOS-latest
-          OS_NAME: MacOS x64
-          DOTNET_RUNTIME_IDENTIFIER: osx-x64
-          RELEASE_ZIP_OS_NAME: osx_x64
-
         - os: windows-latest
           OS_NAME: Windows x64
           DOTNET_RUNTIME_IDENTIFIER: win-x64
