@@ -5,6 +5,7 @@ namespace Ryujinx.Graphics.OpenGL
 {
     static class HwCapabilities
     {
+        private static readonly Lazy<bool> _supportsAlphaToCoverageDitherControl = new Lazy<bool>(() => HasExtension("GL_NV_alpha_to_coverage_dither_control"));
         private static readonly Lazy<bool> _supportsAstcCompression           = new Lazy<bool>(() => HasExtension("GL_KHR_texture_compression_astc_ldr"));
         private static readonly Lazy<bool> _supportsDrawTexture               = new Lazy<bool>(() => HasExtension("GL_NV_draw_texture"));
         private static readonly Lazy<bool> _supportsFragmentShaderInterlock   = new Lazy<bool>(() => HasExtension("GL_ARB_fragment_shader_interlock"));
@@ -50,6 +51,7 @@ namespace Ryujinx.Graphics.OpenGL
 
         public static bool UsePersistentBufferForFlush       => _gpuVendor.Value == GpuVendor.AmdWindows || _gpuVendor.Value == GpuVendor.Nvidia;
 
+        public static bool SupportsAlphaToCoverageDitherControl => _supportsAlphaToCoverageDitherControl.Value;
         public static bool SupportsAstcCompression           => _supportsAstcCompression.Value;
         public static bool SupportsDrawTexture               => _supportsDrawTexture.Value;
         public static bool SupportsFragmentShaderInterlock   => _supportsFragmentShaderInterlock.Value;

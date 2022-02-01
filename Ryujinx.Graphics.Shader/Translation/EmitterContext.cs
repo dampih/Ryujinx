@@ -2,6 +2,7 @@ using Ryujinx.Graphics.Shader.Decoders;
 using Ryujinx.Graphics.Shader.IntermediateRepresentation;
 using System.Collections.Generic;
 using System.Diagnostics;
+using System.Numerics;
 using System.Runtime.CompilerServices;
 
 using static Ryujinx.Graphics.Shader.IntermediateRepresentation.OperandHelper;
@@ -158,6 +159,8 @@ namespace Ryujinx.Graphics.Shader.Translation
         {
             if (!IsNonMain && Config.Stage == ShaderStage.Fragment)
             {
+                GenerateAlphaToCoverageDitherDiscard();
+
                 if (Config.OmapDepth)
                 {
                     Operand dest = Attribute(AttributeConsts.FragmentOutputDepth);
@@ -217,6 +220,37 @@ namespace Ryujinx.Graphics.Shader.Translation
                     }
                 }
             }
+        }
+
+        private void GenerateAlphaToCoverageDitherDiscard()
+        {
+            // If alpha is not written, then we're done.
+            if ((Config.OmapTargets & 8) == 0)
+            {
+                return;
+            }
+
+            // 11 11 11 10 10 10 10 00
+            // 11 01 01 01 01 00 00 00
+            Operand ditherMask = Const(unchecked((int)0xfbb99110u));
+
+            Operand a2cDitherEndLabel = Label();
+
+            this.BranchIfFalse(a2cDitherEndLabel, Attribute(AttributeConsts.FragmentAlphaToCoverageDither));
+
+            Operand x = this.BitwiseAnd(this.FP32ConvertToU32(Attribute(AttributeConsts.PositionX)), Const(1));
+            Operand y = this.BitwiseAnd(this.FP32ConvertToU32(Attribute(AttributeConsts.PositionY)), Const(1));
+            Operand xy = this.BitwiseOr(x, this.ShiftLeft(y, Const(1)));
+
+            Operand alpha = Register(3, RegisterType.Gpr);
+            Operand scaledAlpha = this.FPMultiply(this.FPSaturate(alpha), ConstF(8));
+            Operand quantizedAlpha = this.IMinimumU32(this.FP32ConvertToU32(scaledAlpha), Const(7));
+            Operand shift = this.BitwiseOr(this.ShiftLeft(quantizedAlpha, Const(2)), xy);
+            Operand opaque = this.BitwiseAnd(this.ShiftRightU32(ditherMask, shift), Const(1));
+
+            this.BranchIfTrue(a2cDitherEndLabel, opaque);
+            this.Discard();
+            this.MarkLabel(a2cDitherEndLabel);
         }
 
         public Operation[] GetOperations()

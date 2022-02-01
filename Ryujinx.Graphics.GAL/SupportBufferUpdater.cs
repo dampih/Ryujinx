@@ -18,6 +18,7 @@ namespace Ryujinx.Graphics.GAL
         {
             _renderer = renderer;
             Handle = renderer.CreateBuffer(SupportBuffer.RequiredSize);
+            renderer.Pipeline.ClearBuffer(Handle, 0, SupportBuffer.RequiredSize, 0);
         }
 
         private void MarkDirty(int startOffset, int byteSize)
@@ -40,6 +41,16 @@ namespace Ryujinx.Graphics.GAL
                 {
                     _endOffset = endOffset;
                 }
+            }
+        }
+
+        public void UpdateFragmentAlphaToCoverageDither(bool enable)
+        {
+            if ((Data.FragmentAlphaToCoverageDither.X != 0) != enable)
+            {
+                Data.FragmentAlphaToCoverageDither.X = (enable ? 1 : 0);
+
+                MarkDirty(SupportBuffer.FragmentAlphaToCoverageDitherOffset, sizeof(int));
             }
         }
 
