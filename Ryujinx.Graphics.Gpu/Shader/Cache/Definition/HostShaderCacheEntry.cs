@@ -78,7 +78,7 @@ namespace Ryujinx.Graphics.Gpu.Shader.Cache.Definition
                                                     programInfo.UsesInstanceId,
                                                     programInfo.UsesRtLayer,
                                                     programInfo.ClipDistancesWritten,
-                                                    programInfo.BindlessTextureFlags);
+                                                    programInfo.BindlessTextureFlags,
                                                     programInfo.FragmentOutputMap);
 
             CBuffers = programInfo.CBuffers.ToArray();
