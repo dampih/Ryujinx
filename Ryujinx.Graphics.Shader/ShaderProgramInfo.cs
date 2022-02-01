@@ -24,9 +24,6 @@ namespace Ryujinx.Graphics.Shader
             BindlessTextureFlags bindlessTextureFlags,
             bool usesInstanceId,
             bool usesRtLayer,
-            byte clipDistancesWritten)
-            bool usesInstanceId,
-            bool usesRtLayer,
             byte clipDistancesWritten,
             int fragmentOutputMap)
         {
