@@ -14,6 +14,7 @@ namespace Ryujinx.Graphics.Shader
         public bool UsesInstanceId { get; }
         public bool UsesRtLayer { get; }
         public byte ClipDistancesWritten { get; }
+        public int FragmentOutputMap { get; }
 
         public ShaderProgramInfo(
             BufferDescriptor[] cBuffers,
@@ -24,6 +25,10 @@ namespace Ryujinx.Graphics.Shader
             bool usesInstanceId,
             bool usesRtLayer,
             byte clipDistancesWritten)
+            bool usesInstanceId,
+            bool usesRtLayer,
+            byte clipDistancesWritten,
+            int fragmentOutputMap)
         {
             CBuffers = Array.AsReadOnly(cBuffers);
             SBuffers = Array.AsReadOnly(sBuffers);
@@ -34,6 +39,7 @@ namespace Ryujinx.Graphics.Shader
             UsesInstanceId = usesInstanceId;
             UsesRtLayer = usesRtLayer;
             ClipDistancesWritten = clipDistancesWritten;
+            FragmentOutputMap = fragmentOutputMap;
         }
     }
 }

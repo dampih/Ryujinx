@@ -106,7 +106,8 @@ namespace Ryujinx.Graphics.Shader.Translation
                 config.BindlessTextureFlags,
                 config.UsedFeatures.HasFlag(FeatureFlags.InstanceId),
                 config.UsedFeatures.HasFlag(FeatureFlags.RtLayer),
-                config.ClipDistancesWritten);
+                config.ClipDistancesWritten,
+                config.OmapTargets);
 
             return program;
         }

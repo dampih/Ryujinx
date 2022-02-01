@@ -27,7 +27,7 @@ namespace Ryujinx.Graphics.Gpu.Shader.Cache.Definition
     /// <summary>
     /// Host shader entry header used for binding information.
     /// </summary>
-    [StructLayout(LayoutKind.Sequential, Pack = 1, Size = 0x14)]
+    [StructLayout(LayoutKind.Sequential, Pack = 1, Size = 0x18)]
     struct HostShaderCacheEntryHeader
     {
         /// <summary>
@@ -72,6 +72,11 @@ namespace Ryujinx.Graphics.Gpu.Shader.Cache.Definition
         public BindlessTextureFlags BindlessTextureFlags;
 
         /// <summary>
+        /// Mask of components written by the fragment shader stage.
+        /// </summary>
+        public int FragmentOutputMap;
+
+        /// <summary>
         /// Create a new host shader cache entry header.
         /// </summary>
         /// <param name="cBuffersCount">Count of constant buffer descriptors</param>
@@ -79,6 +84,8 @@ namespace Ryujinx.Graphics.Gpu.Shader.Cache.Definition
         /// <param name="texturesCount">Count of texture descriptors</param>
         /// <param name="imagesCount">Count of image descriptors</param>
         /// <param name="usesInstanceId">Set to true if the shader uses instance id</param>
+        /// <param name="clipDistancesWritten">Mask of clip distances that are written to on the shader</param>
+        /// <param name="fragmentOutputMap">Mask of components written by the fragment shader stage</param>
         public HostShaderCacheEntryHeader(
             int cBuffersCount,
             int sBuffersCount,
@@ -88,6 +95,7 @@ namespace Ryujinx.Graphics.Gpu.Shader.Cache.Definition
             bool usesRtLayer,
             byte clipDistancesWritten,
             BindlessTextureFlags bindlessTextureFlags) : this()
+            int fragmentOutputMap) : this()
         {
             CBuffersCount        = cBuffersCount;
             SBuffersCount        = sBuffersCount;
@@ -95,6 +103,7 @@ namespace Ryujinx.Graphics.Gpu.Shader.Cache.Definition
             ImagesCount          = imagesCount;
             ClipDistancesWritten = clipDistancesWritten;
             BindlessTextureFlags = bindlessTextureFlags;
+            FragmentOutputMap    = fragmentOutputMap;
             InUse                = true;
 
             UseFlags = usesInstanceId ? UseFlags.InstanceId : UseFlags.None;

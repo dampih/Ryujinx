@@ -79,6 +79,8 @@ namespace Ryujinx.Graphics.Gpu.Shader.Cache.Definition
                                                     programInfo.UsesRtLayer,
                                                     programInfo.ClipDistancesWritten,
                                                     programInfo.BindlessTextureFlags);
+                                                    programInfo.FragmentOutputMap);
+
             CBuffers = programInfo.CBuffers.ToArray();
             SBuffers = programInfo.SBuffers.ToArray();
             Textures = programInfo.Textures.ToArray();
@@ -99,7 +101,8 @@ namespace Ryujinx.Graphics.Gpu.Shader.Cache.Definition
                 Header.BindlessTextureFlags,
                 Header.UseFlags.HasFlag(UseFlags.InstanceId),
                 Header.UseFlags.HasFlag(UseFlags.RtLayer),
-                Header.ClipDistancesWritten);
+                Header.ClipDistancesWritten,
+                Header.FragmentOutputMap);
         }
 
         /// <summary>
