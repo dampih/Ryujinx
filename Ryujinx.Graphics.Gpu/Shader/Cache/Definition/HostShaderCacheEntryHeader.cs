@@ -94,7 +94,7 @@ namespace Ryujinx.Graphics.Gpu.Shader.Cache.Definition
             bool usesInstanceId,
             bool usesRtLayer,
             byte clipDistancesWritten,
-            BindlessTextureFlags bindlessTextureFlags) : this()
+            BindlessTextureFlags bindlessTextureFlags,
             int fragmentOutputMap) : this()
         {
             CBuffersCount        = cBuffersCount;
