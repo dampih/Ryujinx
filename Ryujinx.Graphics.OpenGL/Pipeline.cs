@@ -52,8 +52,9 @@ namespace Ryujinx.Graphics.OpenGL
         private ClipOrigin _clipOrigin;
         private ClipDepthMode _clipDepthMode;
 
-        private int _fragmentOutputMap;
-        private readonly uint[] _componentMasks;
+        private uint _fragmentOutputMap;
+        private uint _componentMasks;
+        private uint _currentComponentMasks;
 
         private uint _scissorEnables;
 
@@ -79,13 +80,8 @@ namespace Ryujinx.Graphics.OpenGL
             _clipOrigin = ClipOrigin.LowerLeft;
             _clipDepthMode = ClipDepthMode.NegativeOneToOne;
 
-            _fragmentOutputMap = -1;
-            _componentMasks = new uint[Constants.MaxRenderTargets];
-
-            for (int index = 0; index < Constants.MaxRenderTargets; index++)
-            {
-                _componentMasks[index] = 0xf;
-            }
+            _fragmentOutputMap = uint.MaxValue;
+            _componentMasks = uint.MaxValue;
 
             var defaultScale = new Vector4<float> { X = 1f, Y = 0f, Z = 0f, W = 0f };
             new Span<Vector4<float>>(_renderScale).Fill(defaultScale);
@@ -1062,13 +1058,13 @@ namespace Ryujinx.Graphics.OpenGL
                 prg.Bind();
             }
 
-            if (prg.HasFragmentShader && _fragmentOutputMap != prg.FragmentOutputMap)
+            if (prg.HasFragmentShader && _fragmentOutputMap != (uint)prg.FragmentOutputMap)
             {
-                _fragmentOutputMap = prg.FragmentOutputMap;
+                _fragmentOutputMap = (uint)prg.FragmentOutputMap;
 
                 for (int index = 0; index < Constants.MaxRenderTargets; index++)
                 {
-                    RestoreComponentMask(index);
+                    RestoreComponentMask(index, force: false);
                 }
             }
 
@@ -1097,11 +1093,13 @@ namespace Ryujinx.Graphics.OpenGL
 
         public void SetRenderTargetColorMasks(ReadOnlySpan<uint> componentMasks)
         {
+            _componentMasks = 0;
+
             for (int index = 0; index < componentMasks.Length; index++)
             {
-                _componentMasks[index] = componentMasks[index];
+                _componentMasks |= componentMasks[index] << (index * 4);
 
-                RestoreComponentMask(index);
+                RestoreComponentMask(index, force: false);
             }
         }
 
@@ -1509,13 +1507,24 @@ namespace Ryujinx.Graphics.OpenGL
             }
         }
 
-        public void RestoreComponentMask(int index)
+        public void RestoreComponentMask(int index, bool force = true)
         {
             // If the bound render target is bgra, swap the red and blue masks.
             uint redMask = _fpIsBgra[index].X == 0 ? 1u : 4u;
             uint blueMask = _fpIsBgra[index].X == 0 ? 4u : 1u;
 
-            uint componentMask = _componentMasks[index] & ((uint)_fragmentOutputMap >> (index * 4));
+            int shift = index * 4;
+            uint componentMask = _componentMasks & _fragmentOutputMap;
+            uint checkMask = 0xfu << shift;
+            uint componentMaskAtIndex = componentMask & checkMask;
+
+            if (!force && componentMaskAtIndex == (_currentComponentMasks & checkMask))
+            {
+                return;
+            }
+
+            componentMask >>= shift;
+            componentMask &= 0xfu;
 
             GL.ColorMask(
                 index,
@@ -1523,6 +1532,9 @@ namespace Ryujinx.Graphics.OpenGL
                 (componentMask & 2u) != 0,
                 (componentMask & blueMask) != 0,
                 (componentMask & 8u) != 0);
+
+            _currentComponentMasks &= ~checkMask;
+            _currentComponentMasks |= componentMaskAtIndex;
         }
 
         public void RestoreScissor0Enable()
