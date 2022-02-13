@@ -11,7 +11,7 @@ namespace Ryujinx.Graphics.OpenGL
 
         static FormatTable()
         {
-            int tableSize = Enum.GetNames(typeof(Format)).Length;
+            int tableSize = Enum.GetNames<Format>().Length;
 
             _table = new FormatInfo[tableSize];
             _tableImage = new SizedInternalFormat[tableSize];
