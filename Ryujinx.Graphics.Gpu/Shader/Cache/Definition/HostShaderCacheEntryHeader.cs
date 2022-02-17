@@ -77,6 +77,11 @@ namespace Ryujinx.Graphics.Gpu.Shader.Cache.Definition
         public int FragmentOutputMap;
 
         /// <summary>
+        /// Mask of components written by the fragment shader stage.
+        /// </summary>
+        public int FragmentOutputMap;
+
+        /// <summary>
         /// Create a new host shader cache entry header.
         /// </summary>
         /// <param name="cBuffersCount">Count of constant buffer descriptors</param>
