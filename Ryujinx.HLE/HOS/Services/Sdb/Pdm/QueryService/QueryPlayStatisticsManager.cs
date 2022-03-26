@@ -1,5 +1,5 @@
-﻿using ARMeilleure.Memory;
-using Ryujinx.Common;
+﻿using Ryujinx.Common;
+using Ryujinx.Cpu;
 using Ryujinx.HLE.HOS.Services.Account.Acc;
 using Ryujinx.HLE.HOS.Services.Sdb.Pdm.QueryService.Types;
 using System;
@@ -15,29 +15,31 @@ namespace Ryujinx.HLE.HOS.Services.Sdb.Pdm.QueryService
 
         internal static ResultCode GetPlayStatistics(ServiceCtx context, bool byUserId = false)
         {
-            long inputPosition = context.Request.SendBuff[0].Position;
-            long inputSize     = context.Request.SendBuff[0].Size;
+            ref readonly var controlProperty = ref context.Device.Application.ControlData.Value;
 
-            long outputPosition = context.Request.ReceiveBuff[0].Position;
-            long outputSize     = context.Request.ReceiveBuff[0].Size;
+            ulong inputPosition = context.Request.SendBuff[0].Position;
+            ulong inputSize     = context.Request.SendBuff[0].Size;
+
+            ulong outputPosition = context.Request.ReceiveBuff[0].Position;
+            ulong outputSize     = context.Request.ReceiveBuff[0].Size;
 
             UserId userId = byUserId ? context.RequestData.ReadStruct<UserId>() : new UserId();
 
             if (byUserId)
             {
-                if (!context.Device.System.State.Account.TryGetUser(userId, out _))
+                if (!context.Device.System.AccountManager.TryGetUser(userId, out _))
                 {
                     return ResultCode.UserNotFound;
                 }
             }
 
-            PlayLogQueryCapability queryCapability = (PlayLogQueryCapability)context.Device.System.ControlData.Value.PlayLogQueryCapability;
+            PlayLogQueryCapability queryCapability = (PlayLogQueryCapability)controlProperty.PlayLogQueryCapability;
 
             List<ulong> titleIds = new List<ulong>();
 
-            for (int i = 0; i < inputSize / sizeof(ulong); i++)
+            for (ulong i = 0; i < inputSize / sizeof(ulong); i++)
             {
-                titleIds.Add(BitConverter.ToUInt64(context.Memory.ReadBytes(inputPosition, inputSize), 0));
+                titleIds.Add(context.Memory.Read<ulong>(inputPosition));
             }
 
             if (queryCapability == PlayLogQueryCapability.WhiteList)
@@ -45,7 +47,7 @@ namespace Ryujinx.HLE.HOS.Services.Sdb.Pdm.QueryService
                 // Check if input title ids are in the whitelist.
                 foreach (ulong titleId in titleIds)
                 {
-                    if (!context.Device.System.ControlData.Value.PlayLogQueryableApplicationId.Contains(titleId))
+                    if (!controlProperty.PlayLogQueryableApplicationId.ItemsRo.Contains(titleId))
                     {
                         return (ResultCode)Am.ResultCode.ObjectInvalid;
                     }
@@ -73,7 +75,7 @@ namespace Ryujinx.HLE.HOS.Services.Sdb.Pdm.QueryService
 
             for (int i = 0; i < filteredApplicationPlayStatistics.Count(); i++)
             {
-                MemoryHelper.Write(context.Memory, outputPosition + (i * Marshal.SizeOf<ApplicationPlayStatistics>()), filteredApplicationPlayStatistics.ElementAt(i).Value);
+                MemoryHelper.Write(context.Memory, outputPosition + (ulong)(i * Marshal.SizeOf<ApplicationPlayStatistics>()), filteredApplicationPlayStatistics.ElementAt(i).Value);
             }
 
             context.ResponseData.Write(filteredApplicationPlayStatistics.Count());

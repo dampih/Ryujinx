@@ -2,8 +2,12 @@ using Ryujinx.Graphics.Shader.IntermediateRepresentation;
 using Ryujinx.Graphics.Shader.StructuredIr;
 using System;
 
+using static Ryujinx.Graphics.Shader.CodeGen.Glsl.Instructions.InstGenBallot;
+using static Ryujinx.Graphics.Shader.CodeGen.Glsl.Instructions.InstGenCall;
+using static Ryujinx.Graphics.Shader.CodeGen.Glsl.Instructions.InstGenFSI;
 using static Ryujinx.Graphics.Shader.CodeGen.Glsl.Instructions.InstGenHelper;
 using static Ryujinx.Graphics.Shader.CodeGen.Glsl.Instructions.InstGenMemory;
+using static Ryujinx.Graphics.Shader.CodeGen.Glsl.Instructions.InstGenPacking;
 using static Ryujinx.Graphics.Shader.StructuredIr.InstructionInfo;
 
 namespace Ryujinx.Graphics.Shader.CodeGen.Glsl.Instructions
@@ -18,10 +22,34 @@ namespace Ryujinx.Graphics.Shader.CodeGen.Glsl.Instructions
             }
             else if (node is AstOperand operand)
             {
-                return context.OperandManager.GetExpression(operand, context.Config.Stage);
+                return context.OperandManager.GetExpression(operand, context.Config);
             }
 
             throw new ArgumentException($"Invalid node type \"{node?.GetType().Name ?? "null"}\".");
+        }
+
+        public static string Negate(CodeGenContext context, AstOperation operation, InstInfo info)
+        {
+            IAstNode src = operation.GetSource(0);
+
+            VariableType type = GetSrcVarType(operation.Inst, 0);
+
+            string srcExpr = GetSoureExpr(context, src, type);
+            string zero;
+
+            if (type == VariableType.F64)
+            {
+                zero = "0.0";
+            }
+            else
+            {
+                NumberFormatter.TryFormat(0, type, out zero);
+            }
+
+            // Starting in the 496.13 NVIDIA driver, there's an issue with assigning variables to negated expressions.
+            // (-expr) does not work, but (0.0 - expr) does. This should be removed once the issue is resolved.
+
+            return $"{zero} - {Enclose(srcExpr, src, operation.Inst, info, false)}";
         }
 
         private static string GetExpression(CodeGenContext context, AstOperation operation)
@@ -40,12 +68,18 @@ namespace Ryujinx.Graphics.Shader.CodeGen.Glsl.Instructions
 
                 for (int argIndex = 0; argIndex < arity; argIndex++)
                 {
+                    // For shared memory access, the second argument is unused and should be ignored.
+                    // It is there to make both storage and shared access have the same number of arguments.
+                    // For storage, both inputs are consumed when the argument index is 0, so we should skip it here.
+                    if (argIndex == 1 && (atomic || (inst & Instruction.MrMask) == Instruction.MrShared))
+                    {
+                        continue;
+                    }
+
                     if (argIndex != 0)
                     {
                         args += ", ";
                     }
-
-                    VariableType dstType = GetSrcVarType(inst, argIndex);
 
                     if (argIndex == 0 && atomic)
                     {
@@ -53,33 +87,31 @@ namespace Ryujinx.Graphics.Shader.CodeGen.Glsl.Instructions
 
                         switch (memRegion)
                         {
-                            case Instruction.MrShared:  args += LoadShared (context, operation); break;
+                            case Instruction.MrShared: args += LoadShared(context, operation); break;
                             case Instruction.MrStorage: args += LoadStorage(context, operation); break;
 
                             default: throw new InvalidOperationException($"Invalid memory region \"{memRegion}\".");
                         }
-
-                        // We use the first 2 operands above.
-                        argIndex++;
                     }
                     else
                     {
+                        VariableType dstType = GetSrcVarType(inst, argIndex);
+
                         args += GetSoureExpr(context, operation.GetSource(argIndex), dstType);
                     }
                 }
 
-                if (inst == Instruction.Ballot)
-                {
-                    return $"unpackUint2x32({info.OpName}({args})).x";
-                }
-                else
-                {
-                    return info.OpName + "(" + args + ")";
-                }
+                return info.OpName + '(' + args + ')';
             }
             else if ((info.Type & InstType.Op) != 0)
             {
                 string op = info.OpName;
+
+                // Return may optionally have a return value (and in this case it is unary).
+                if (inst == Instruction.Return && operation.SourcesCount != 0)
+                {
+                    return $"{op} {GetSoureExpr(context, operation.GetSource(0), context.CurrentFunction.ReturnType)}";
+                }
 
                 int arity = (int)(info.Type & InstType.ArityMask);
 
@@ -113,55 +145,87 @@ namespace Ryujinx.Graphics.Shader.CodeGen.Glsl.Instructions
             }
             else if ((info.Type & InstType.Special) != 0)
             {
-                switch (inst)
+                switch (inst & Instruction.Mask)
                 {
+                    case Instruction.Ballot:
+                        return Ballot(context, operation);
+
+                    case Instruction.Call:
+                        return Call(context, operation);
+
+                    case Instruction.FSIBegin:
+                        return FSIBegin(context);
+
+                    case Instruction.FSIEnd:
+                        return FSIEnd(context);
+
+                    case Instruction.ImageLoad:
                     case Instruction.ImageStore:
-                        return InstGenMemory.ImageStore(context, operation);
+                    case Instruction.ImageAtomic:
+                        return ImageLoadOrStore(context, operation);
 
                     case Instruction.LoadAttribute:
-                        return InstGenMemory.LoadAttribute(context, operation);
+                        return LoadAttribute(context, operation);
 
                     case Instruction.LoadConstant:
-                        return InstGenMemory.LoadConstant(context, operation);
+                        return LoadConstant(context, operation);
 
                     case Instruction.LoadLocal:
-                        return InstGenMemory.LoadLocal(context, operation);
+                        return LoadLocal(context, operation);
 
                     case Instruction.LoadShared:
-                        return InstGenMemory.LoadShared(context, operation);
+                        return LoadShared(context, operation);
 
                     case Instruction.LoadStorage:
-                        return InstGenMemory.LoadStorage(context, operation);
+                        return LoadStorage(context, operation);
 
                     case Instruction.Lod:
-                        return InstGenMemory.Lod(context, operation);
+                        return Lod(context, operation);
+
+                    case Instruction.Negate:
+                        return Negate(context, operation, info);
 
                     case Instruction.PackDouble2x32:
-                        return InstGenPacking.PackDouble2x32(context, operation);
+                        return PackDouble2x32(context, operation);
 
                     case Instruction.PackHalf2x16:
-                        return InstGenPacking.PackHalf2x16(context, operation);
+                        return PackHalf2x16(context, operation);
+
+                    case Instruction.StoreAttribute:
+                        return StoreAttribute(context, operation);
 
                     case Instruction.StoreLocal:
-                        return InstGenMemory.StoreLocal(context, operation);
+                        return StoreLocal(context, operation);
 
                     case Instruction.StoreShared:
-                        return InstGenMemory.StoreShared(context, operation);
+                        return StoreShared(context, operation);
+
+                    case Instruction.StoreShared16:
+                        return StoreShared16(context, operation);
+
+                    case Instruction.StoreShared8:
+                        return StoreShared8(context, operation);
 
                     case Instruction.StoreStorage:
-                        return InstGenMemory.StoreStorage(context, operation);
+                        return StoreStorage(context, operation);
+
+                    case Instruction.StoreStorage16:
+                        return StoreStorage16(context, operation);
+
+                    case Instruction.StoreStorage8:
+                        return StoreStorage8(context, operation);
 
                     case Instruction.TextureSample:
-                        return InstGenMemory.TextureSample(context, operation);
+                        return TextureSample(context, operation);
 
                     case Instruction.TextureSize:
-                        return InstGenMemory.TextureSize(context, operation);
+                        return TextureSize(context, operation);
 
                     case Instruction.UnpackDouble2x32:
-                        return InstGenPacking.UnpackDouble2x32(context, operation);
+                        return UnpackDouble2x32(context, operation);
 
                     case Instruction.UnpackHalf2x16:
-                        return InstGenPacking.UnpackHalf2x16(context, operation);
+                        return UnpackHalf2x16(context, operation);
                 }
             }
 

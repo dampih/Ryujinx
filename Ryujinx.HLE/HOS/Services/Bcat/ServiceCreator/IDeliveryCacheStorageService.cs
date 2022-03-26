@@ -1,47 +1,75 @@
-using Ryujinx.HLE.HOS.Services.Arp;
-using System;
-using System.Text;
+using LibHac;
+using LibHac.Bcat;
+using LibHac.Common;
+using System.Runtime.InteropServices;
 
 namespace Ryujinx.HLE.HOS.Services.Bcat.ServiceCreator
 {
-    class IDeliveryCacheStorageService : IpcService
+    class IDeliveryCacheStorageService : DisposableIpcService
     {
-        private const int DeliveryCacheDirectoriesLimit    = 100;
-        private const int DeliveryCacheDirectoryNameLength = 32;
+        private SharedRef<LibHac.Bcat.Impl.Ipc.IDeliveryCacheStorageService> _base;
 
-        private string[] _deliveryCacheDirectories = new string[0];
-
-        public IDeliveryCacheStorageService(ServiceCtx context, ApplicationLaunchProperty applicationLaunchProperty)
+        public IDeliveryCacheStorageService(ServiceCtx context, ref SharedRef<LibHac.Bcat.Impl.Ipc.IDeliveryCacheStorageService> baseService)
         {
-            // TODO: Read directories.meta file from the save data (loaded in IServiceCreator) in _deliveryCacheDirectories.
+            _base = SharedRef<LibHac.Bcat.Impl.Ipc.IDeliveryCacheStorageService>.CreateMove(ref baseService);
         }
 
-        [Command(10)]
+        [CommandHipc(0)]
+        // CreateFileService() -> object<nn::bcat::detail::ipc::IDeliveryCacheFileService>
+        public ResultCode CreateFileService(ServiceCtx context)
+        {
+            using var service = new SharedRef<LibHac.Bcat.Impl.Ipc.IDeliveryCacheFileService>();
+
+            Result result = _base.Get.CreateFileService(ref service.Ref());
+
+            if (result.IsSuccess())
+            {
+                MakeObject(context, new IDeliveryCacheFileService(ref service.Ref()));
+            }
+
+            return (ResultCode)result.Value;
+        }
+
+        [CommandHipc(1)]
+        // CreateDirectoryService() -> object<nn::bcat::detail::ipc::IDeliveryCacheDirectoryService>
+        public ResultCode CreateDirectoryService(ServiceCtx context)
+        {
+            using var service = new SharedRef<LibHac.Bcat.Impl.Ipc.IDeliveryCacheDirectoryService>();
+
+            Result result = _base.Get.CreateDirectoryService(ref service.Ref());
+
+            if (result.IsSuccess())
+            {
+                MakeObject(context, new IDeliveryCacheDirectoryService(ref service.Ref()));
+            }
+
+            return (ResultCode)result.Value;
+        }
+
+        [CommandHipc(10)]
         // EnumerateDeliveryCacheDirectory() -> (u32, buffer<nn::bcat::DirectoryName, 6>)
         public ResultCode EnumerateDeliveryCacheDirectory(ServiceCtx context)
         {
-            long outputPosition = context.Request.ReceiveBuff[0].Position;
-            long outputSize     = context.Request.ReceiveBuff[0].Size;
+            ulong position = context.Request.ReceiveBuff[0].Position;
+            ulong size = context.Request.ReceiveBuff[0].Size;
 
-            for (int index = 0; index < _deliveryCacheDirectories.Length; index++)
+            byte[] data = new byte[size];
+
+            Result result = _base.Get.EnumerateDeliveryCacheDirectory(out int count, MemoryMarshal.Cast<byte, DirectoryName>(data));
+
+            context.Memory.Write(position, data);
+
+            context.ResponseData.Write(count);
+
+            return (ResultCode)result.Value;
+        }
+
+        protected override void Dispose(bool isDisposing)
+        {
+            if (isDisposing)
             {
-                if (index == DeliveryCacheDirectoriesLimit - 1)
-                {
-                    break;
-                }
-
-                byte[] directoryNameBuffer = Encoding.ASCII.GetBytes(_deliveryCacheDirectories[index]);
-
-                Array.Resize(ref directoryNameBuffer, DeliveryCacheDirectoryNameLength);
-
-                directoryNameBuffer[DeliveryCacheDirectoryNameLength - 1] = 0x00;
-                
-                context.Memory.WriteBytes(outputPosition + index * DeliveryCacheDirectoryNameLength, directoryNameBuffer);
+                _base.Destroy();
             }
-
-            context.ResponseData.Write(_deliveryCacheDirectories.Length);
-
-            return ResultCode.Success;
         }
     }
 }

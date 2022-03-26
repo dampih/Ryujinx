@@ -6,7 +6,7 @@ using System;
 using static ARMeilleure.Instructions.InstEmitHelper;
 using static ARMeilleure.Instructions.InstEmitSimdHelper;
 using static ARMeilleure.Instructions.InstEmitSimdHelper32;
-using static ARMeilleure.IntermediateRepresentation.OperandHelper;
+using static ARMeilleure.IntermediateRepresentation.Operand.Factory;
 
 namespace ARMeilleure.Instructions
 {
@@ -34,7 +34,23 @@ namespace ARMeilleure.Instructions
 
         public static void Vmvn_I(ArmEmitterContext context)
         {
-            EmitVectorImmUnaryOp32(context, (op1) => context.BitwiseExclusiveOr(op1, op1));
+            if (Optimizations.UseSse2)
+            {
+                EmitVectorUnaryOpSimd32(context, (op1) =>
+                {
+                    Operand mask = X86GetAllElements(context, -1L);
+                    return context.AddIntrinsic(Intrinsic.X86Pandn, op1, mask);
+                });
+            }
+            else
+            {
+                EmitVectorUnaryOpZx32(context, (op1) => context.BitwiseNot(op1));
+            }
+        }
+
+        public static void Vmvn_II(ArmEmitterContext context)
+        {
+            EmitVectorImmUnaryOp32(context, (op1) => context.BitwiseNot(op1));
         }
 
         public static void Vmov_GS(ArmEmitterContext context)
@@ -139,6 +155,36 @@ namespace ARMeilleure.Instructions
             }
         }
 
+        public static void Vmovl(ArmEmitterContext context)
+        {
+            OpCode32SimdLong op = (OpCode32SimdLong)context.CurrOp;
+
+            Operand res = context.VectorZero();
+
+            int elems = op.GetBytesCount() >> op.Size;
+
+            for (int index = 0; index < elems; index++)
+            {
+                Operand me = EmitVectorExtract32(context, op.Qm, op.Im + index, op.Size, !op.U);
+
+                if (op.Size == 2)
+                {
+                    if (op.U)
+                    {
+                        me = context.ZeroExtend32(OperandType.I64, me);
+                    }
+                    else
+                    {
+                        me = context.SignExtend32(OperandType.I64, me);
+                    }
+                }
+
+                res = EmitVectorInsert(context, res, me, index, op.Size + 1);
+            }
+
+            context.Copy(GetVecA32(op.Qd), res);
+        }
+
         public static void Vtbl(ArmEmitterContext context)
         {
             OpCode32SimdTbl op = (OpCode32SimdTbl)context.CurrOp;
@@ -221,7 +267,7 @@ namespace ARMeilleure.Instructions
                     Operand selectedIndex = context.ZeroExtend8(OperandType.I32, context.VectorExtract8(m, index + op.Im));
 
                     Operand inRange = context.ICompareLess(selectedIndex, Const(byteLength));
-                    Operand elemRes = null; // Note: This is I64 for ease of calculation.
+                    Operand elemRes = default; // Note: This is I64 for ease of calculation.
 
                     // TODO: Branching rather than conditional select.
 
@@ -279,7 +325,7 @@ namespace ARMeilleure.Instructions
             {
                 EmitVectorShuffleOpSimd32(context, (m, d) =>
                 {
-                    Operand mask = null;
+                    Operand mask = default;
 
                     if (op.Size < 3)
                     {
@@ -421,7 +467,7 @@ namespace ARMeilleure.Instructions
                 {
                     if (op.RegisterSize == RegisterSize.Simd128)
                     {
-                        Operand mask = null;
+                        Operand mask = default;
 
                         if (op.Size < 3)
                         {
@@ -513,7 +559,7 @@ namespace ARMeilleure.Instructions
             }
         }
 
-        public static void EmitVectorShuffleOpSimd32(ArmEmitterContext context, Func<Operand, Operand, (Operand, Operand)> shuffleFunc)
+        private static void EmitVectorShuffleOpSimd32(ArmEmitterContext context, Func<Operand, Operand, (Operand, Operand)> shuffleFunc)
         {
             OpCode32Simd op = (OpCode32Simd)context.CurrOp;
 

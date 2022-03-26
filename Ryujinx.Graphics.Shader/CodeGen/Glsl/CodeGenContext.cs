@@ -1,5 +1,5 @@
+using Ryujinx.Graphics.Shader.StructuredIr;
 using Ryujinx.Graphics.Shader.Translation;
-using System.Collections.Generic;
 using System.Text;
 
 namespace Ryujinx.Graphics.Shader.CodeGen.Glsl
@@ -8,29 +8,24 @@ namespace Ryujinx.Graphics.Shader.CodeGen.Glsl
     {
         public const string Tab = "    ";
 
-        public ShaderConfig Config { get; }
+        public StructuredFunction CurrentFunction { get; set; }
 
-        public List<BufferDescriptor>  CBufferDescriptors { get; }
-        public List<BufferDescriptor>  SBufferDescriptors { get; }
-        public List<TextureDescriptor> TextureDescriptors { get; }
-        public List<TextureDescriptor> ImageDescriptors   { get; }
+        public ShaderConfig Config { get; }
 
         public OperandManager OperandManager { get; }
 
-        private StringBuilder _sb;
+        private readonly StructuredProgramInfo _info;
+
+        private readonly StringBuilder _sb;
 
         private int _level;
 
         private string _indentation;
 
-        public CodeGenContext(ShaderConfig config)
+        public CodeGenContext(StructuredProgramInfo info, ShaderConfig config)
         {
+            _info = info;
             Config = config;
-
-            CBufferDescriptors = new List<BufferDescriptor>();
-            SBufferDescriptors = new List<BufferDescriptor>();
-            TextureDescriptors = new List<TextureDescriptor>();
-            ImageDescriptors   = new List<TextureDescriptor>();
 
             OperandManager = new OperandManager();
 
@@ -73,6 +68,51 @@ namespace Ryujinx.Graphics.Shader.CodeGen.Glsl
             UpdateIndentation();
 
             AppendLine("}" + suffix);
+        }
+
+        private static int FindDescriptorIndex(TextureDescriptor[] array, AstTextureOperation texOp)
+        {
+            for (int i = 0; i < array.Length; i++)
+            {
+                var descriptor = array[i];
+
+                if (descriptor.Type == texOp.Type &&
+                    descriptor.CbufSlot == texOp.CbufSlot &&
+                    descriptor.HandleIndex == texOp.Handle &&
+                    descriptor.Format == texOp.Format)
+                {
+                    return i;
+                }
+            }
+
+            return -1;
+        }
+
+        public int FindTextureDescriptorIndex(AstTextureOperation texOp)
+        {
+            return FindDescriptorIndex(Config.GetTextureDescriptors(), texOp);
+        }
+
+        public int FindImageDescriptorIndex(AstTextureOperation texOp)
+        {
+            return FindDescriptorIndex(Config.GetImageDescriptors(), texOp);
+        }
+
+        public StructuredFunction GetFunction(int id)
+        {
+            return _info.Functions[id];
+        }
+
+        public TransformFeedbackOutput GetTransformFeedbackOutput(int location, int component)
+        {
+            int index = (AttributeConsts.UserAttributeBase / 4) + location * 4 + component;
+            return _info.TransformFeedbackOutputs[index];
+        }
+
+        public TransformFeedbackOutput GetTransformFeedbackOutput(int location)
+        {
+            int index = location / 4;
+            return _info.TransformFeedbackOutputs[index];
         }
 
         private void UpdateIndentation()

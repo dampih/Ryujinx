@@ -1,6 +1,7 @@
 using OpenTK.Graphics.OpenGL;
 using Ryujinx.Graphics.GAL;
 using System;
+using System.Runtime.CompilerServices;
 
 namespace Ryujinx.Graphics.OpenGL
 {
@@ -10,12 +11,26 @@ namespace Ryujinx.Graphics.OpenGL
 
         private bool _needsAttribsUpdate;
 
-        private VertexBufferDescriptor[] _vertexBuffers;
-        private VertexAttribDescriptor[] _vertexAttribs;
+        private readonly VertexAttribDescriptor[] _vertexAttribs;
+        private readonly VertexBufferDescriptor[] _vertexBuffers;
+
+        private int _vertexAttribsCount;
+        private int _vertexBuffersCount;
+
+        private uint _vertexAttribsInUse;
+        private uint _vertexBuffersInUse;
+
+        private BufferRange _indexBuffer;
+        private BufferHandle _tempIndexBuffer;
 
         public VertexArray()
         {
             Handle = GL.GenVertexArray();
+
+            _vertexAttribs = new VertexAttribDescriptor[Constants.MaxVertexAttribs];
+            _vertexBuffers = new VertexBufferDescriptor[Constants.MaxVertexBuffers];
+
+            _tempIndexBuffer = Buffer.Create();
         }
 
         public void Bind()
@@ -23,42 +38,60 @@ namespace Ryujinx.Graphics.OpenGL
             GL.BindVertexArray(Handle);
         }
 
-        public void SetVertexBuffers(VertexBufferDescriptor[] vertexBuffers)
+        public void SetVertexBuffers(ReadOnlySpan<VertexBufferDescriptor> vertexBuffers)
         {
-            int bindingIndex = 0;
-
-            foreach (VertexBufferDescriptor vb in vertexBuffers)
+            int bindingIndex;
+            for (bindingIndex = 0; bindingIndex < vertexBuffers.Length; bindingIndex++)
             {
-                if (vb.Buffer.Buffer != null)
+                VertexBufferDescriptor vb = vertexBuffers[bindingIndex];
+
+                if (vb.Buffer.Handle != BufferHandle.Null)
                 {
-                    int bufferHandle = ((Buffer)vb.Buffer.Buffer).Handle;
-
-                    GL.BindVertexBuffer(bindingIndex, bufferHandle, (IntPtr)vb.Buffer.Offset, vb.Stride);
-
+                    GL.BindVertexBuffer(bindingIndex, vb.Buffer.Handle.ToInt32(), (IntPtr)vb.Buffer.Offset, vb.Stride);
                     GL.VertexBindingDivisor(bindingIndex, vb.Divisor);
+                    _vertexBuffersInUse |= 1u << bindingIndex;
                 }
                 else
                 {
-                    GL.BindVertexBuffer(bindingIndex, 0, IntPtr.Zero, 0);
+                    if ((_vertexBuffersInUse & (1u << bindingIndex)) != 0)
+                    {
+                        GL.BindVertexBuffer(bindingIndex, 0, IntPtr.Zero, 0);
+                        _vertexBuffersInUse &= ~(1u << bindingIndex);
+                    }
                 }
 
-                bindingIndex++;
+                _vertexBuffers[bindingIndex] = vb;
             }
 
-            _vertexBuffers = vertexBuffers;
-
+            _vertexBuffersCount = bindingIndex;
             _needsAttribsUpdate = true;
         }
 
-        public void SetVertexAttributes(VertexAttribDescriptor[] vertexAttribs)
+        public void SetVertexAttributes(ReadOnlySpan<VertexAttribDescriptor> vertexAttribs)
         {
-            int attribIndex = 0;
+            int index = 0;
 
-            foreach (VertexAttribDescriptor attrib in vertexAttribs)
+            for (; index < vertexAttribs.Length; index++)
             {
+                VertexAttribDescriptor attrib = vertexAttribs[index];
+
+                if (attrib.Equals(_vertexAttribs[index]))
+                {
+                    continue;
+                }
+
                 FormatInfo fmtInfo = FormatTable.GetFormatInfo(attrib.Format);
 
-                GL.EnableVertexAttribArray(attribIndex);
+                if (attrib.IsZero)
+                {
+                    // Disabling the attribute causes the shader to read a constant value.
+                    // We currently set the constant to (0, 0, 0, 0).
+                    DisableVertexAttrib(index);
+                }
+                else
+                {
+                    EnableVertexAttrib(index);
+                }
 
                 int offset = attrib.Offset;
                 int size   = fmtInfo.Components;
@@ -70,60 +103,99 @@ namespace Ryujinx.Graphics.OpenGL
                 {
                     VertexAttribType type = (VertexAttribType)fmtInfo.PixelType;
 
-                    GL.VertexAttribFormat(attribIndex, size, type, fmtInfo.Normalized, offset);
+                    GL.VertexAttribFormat(index, size, type, fmtInfo.Normalized, offset);
                 }
                 else
                 {
                     VertexAttribIntegerType type = (VertexAttribIntegerType)fmtInfo.PixelType;
 
-                    GL.VertexAttribIFormat(attribIndex, size, type, offset);
+                    GL.VertexAttribIFormat(index, size, type, offset);
                 }
 
-                GL.VertexAttribBinding(attribIndex, attrib.BufferIndex);
+                GL.VertexAttribBinding(index, attrib.BufferIndex);
 
-                attribIndex++;
+                _vertexAttribs[index] = attrib;
             }
 
-            for (; attribIndex < 16; attribIndex++)
+            _vertexAttribsCount = index;
+
+            for (; index < Constants.MaxVertexAttribs; index++)
             {
-                GL.DisableVertexAttribArray(attribIndex);
+                DisableVertexAttrib(index);
             }
-
-            _vertexAttribs = vertexAttribs;
         }
 
-        public void SetIndexBuffer(Buffer indexBuffer)
+        public void SetIndexBuffer(BufferRange range)
         {
-            GL.BindBuffer(BufferTarget.ElementArrayBuffer, indexBuffer?.Handle ?? 0);
+            _indexBuffer = range;
+            GL.BindBuffer(BufferTarget.ElementArrayBuffer, range.Handle.ToInt32());
+        }
+
+        public void SetRangeOfIndexBuffer()
+        {
+            Buffer.Resize(_tempIndexBuffer, _indexBuffer.Size);
+            Buffer.Copy(_indexBuffer.Handle, _tempIndexBuffer, _indexBuffer.Offset, 0, _indexBuffer.Size);
+            GL.BindBuffer(BufferTarget.ElementArrayBuffer, _tempIndexBuffer.ToInt32());
+        }
+
+        public void RestoreIndexBuffer()
+        {
+            GL.BindBuffer(BufferTarget.ElementArrayBuffer, _indexBuffer.Handle.ToInt32());
         }
 
         public void Validate()
         {
-            for (int attribIndex = 0; attribIndex < _vertexAttribs.Length; attribIndex++)
+            for (int attribIndex = 0; attribIndex < _vertexAttribsCount; attribIndex++)
             {
                 VertexAttribDescriptor attrib = _vertexAttribs[attribIndex];
 
-                if ((uint)attrib.BufferIndex >= _vertexBuffers.Length)
+                if (!attrib.IsZero)
                 {
-                    GL.DisableVertexAttribArray(attribIndex);
+                    if ((uint)attrib.BufferIndex >= _vertexBuffersCount)
+                    {
+                        DisableVertexAttrib(attribIndex);
+                        continue;
+                    }
 
-                    continue;
-                }
+                    if (_vertexBuffers[attrib.BufferIndex].Buffer.Handle == BufferHandle.Null)
+                    {
+                        DisableVertexAttrib(attribIndex);
+                        continue;
+                    }
 
-                if (_vertexBuffers[attrib.BufferIndex].Buffer.Buffer == null)
-                {
-                    GL.DisableVertexAttribArray(attribIndex);
-
-                    continue;
-                }
-
-                if (_needsAttribsUpdate)
-                {
-                    GL.EnableVertexAttribArray(attribIndex);
+                    if (_needsAttribsUpdate)
+                    {
+                        EnableVertexAttrib(attribIndex);
+                    }
                 }
             }
 
             _needsAttribsUpdate = false;
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        private void EnableVertexAttrib(int index)
+        {
+            uint mask = 1u << index;
+
+            if ((_vertexAttribsInUse & mask) == 0)
+            {
+                _vertexAttribsInUse |= mask;
+                GL.EnableVertexAttribArray(index);
+            }
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        private void DisableVertexAttrib(int index)
+        {
+            uint mask = 1u << index;
+
+            if ((_vertexAttribsInUse & mask) != 0)
+            {
+                _vertexAttribsInUse &= ~mask;
+                GL.DisableVertexAttribArray(index);
+                GL.VertexAttrib4(index, 0f, 0f, 0f, 1f);
+            }
         }
 
         public void Dispose()

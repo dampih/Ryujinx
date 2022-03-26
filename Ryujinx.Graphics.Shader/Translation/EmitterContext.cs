@@ -1,6 +1,9 @@
 using Ryujinx.Graphics.Shader.Decoders;
 using Ryujinx.Graphics.Shader.IntermediateRepresentation;
 using System.Collections.Generic;
+using System.Diagnostics;
+using System.Numerics;
+using System.Runtime.CompilerServices;
 
 using static Ryujinx.Graphics.Shader.IntermediateRepresentation.OperandHelper;
 
@@ -8,24 +11,33 @@ namespace Ryujinx.Graphics.Shader.Translation
 {
     class EmitterContext
     {
-        public Block  CurrBlock { get; set; }
-        public OpCode CurrOp    { get; set; }
+        public DecodedProgram Program { get; }
+        public ShaderConfig Config { get; }
 
-        private ShaderConfig _config;
+        public bool IsNonMain { get; }
 
-        public ShaderConfig Config => _config;
+        public Block CurrBlock { get; set; }
+        public InstOp CurrOp { get; set; }
 
-        private List<Operation> _operations;
+        public int OperationsCount => _operations.Count;
 
-        private Dictionary<ulong, Operand> _labels;
+        private readonly List<Operation> _operations;
+        private readonly Dictionary<ulong, Operand> _labels;
 
-        public EmitterContext(ShaderConfig config)
+        public EmitterContext(DecodedProgram program, ShaderConfig config, bool isNonMain)
         {
-            _config = config;
-
+            Program = program;
+            Config = config;
+            IsNonMain = isNonMain;
             _operations = new List<Operation>();
-
             _labels = new Dictionary<ulong, Operand>();
+        }
+
+        public T GetOp<T>() where T : unmanaged
+        {
+            Debug.Assert(Unsafe.SizeOf<T>() == sizeof(ulong));
+            ulong op = CurrOp.RawOpCode;
+            return Unsafe.As<ulong, T>(ref op);
         }
 
         public Operand Add(Instruction inst, Operand dest = null, params Operand[] sources)
@@ -37,9 +49,93 @@ namespace Ryujinx.Graphics.Shader.Translation
             return dest;
         }
 
+        public (Operand, Operand) Add(Instruction inst, (Operand, Operand) dest, params Operand[] sources)
+        {
+            Operand[] dests = new[] { dest.Item1, dest.Item2 };
+
+            Operation operation = new Operation(inst, 0, dests, sources);
+
+            Add(operation);
+
+            return dest;
+        }
+
         public void Add(Operation operation)
         {
             _operations.Add(operation);
+        }
+
+        public TextureOperation CreateTextureOperation(
+            Instruction inst,
+            SamplerType type,
+            TextureFlags flags,
+            int handle,
+            int compIndex,
+            Operand dest,
+            params Operand[] sources)
+        {
+            return CreateTextureOperation(inst, type, TextureFormat.Unknown, flags, handle, compIndex, dest, sources);
+        }
+
+        public TextureOperation CreateTextureOperation(
+            Instruction inst,
+            SamplerType type,
+            TextureFormat format,
+            TextureFlags flags,
+            int handle,
+            int compIndex,
+            Operand dest,
+            params Operand[] sources)
+        {
+            if (!flags.HasFlag(TextureFlags.Bindless))
+            {
+                Config.SetUsedTexture(inst, type, format, flags, TextureOperation.DefaultCbufSlot, handle);
+            }
+
+            return new TextureOperation(inst, type, format, flags, handle, compIndex, dest, sources);
+        }
+
+        public void FlagAttributeRead(int attribute)
+        {
+            if (Config.Stage == ShaderStage.Vertex && attribute == AttributeConsts.InstanceId)
+            {
+                Config.SetUsedFeature(FeatureFlags.InstanceId);
+            }
+            else if (Config.Stage == ShaderStage.Fragment)
+            {
+                switch (attribute)
+                {
+                    case AttributeConsts.PositionX:
+                    case AttributeConsts.PositionY:
+                        Config.SetUsedFeature(FeatureFlags.FragCoordXY);
+                        break;
+                }
+            }
+        }
+
+        public void FlagAttributeWritten(int attribute)
+        {
+            if (Config.Stage == ShaderStage.Vertex)
+            {
+                switch (attribute)
+                {
+                    case AttributeConsts.ClipDistance0:
+                    case AttributeConsts.ClipDistance1:
+                    case AttributeConsts.ClipDistance2:
+                    case AttributeConsts.ClipDistance3:
+                    case AttributeConsts.ClipDistance4:
+                    case AttributeConsts.ClipDistance5:
+                    case AttributeConsts.ClipDistance6:
+                    case AttributeConsts.ClipDistance7:
+                        Config.SetClipDistanceWritten((attribute - AttributeConsts.ClipDistance0) / 4);
+                        break;
+                }
+            }
+
+            if (Config.Stage != ShaderStage.Fragment && attribute == AttributeConsts.Layer)
+            {
+                Config.SetUsedFeature(FeatureFlags.RtLayer);
+            }
         }
 
         public void MarkLabel(Operand label)
@@ -61,38 +157,100 @@ namespace Ryujinx.Graphics.Shader.Translation
 
         public void PrepareForReturn()
         {
-            if (_config.Stage == ShaderStage.Fragment)
+            if (!IsNonMain && Config.Stage == ShaderStage.Fragment)
             {
-                if (_config.OmapDepth)
+                GenerateAlphaToCoverageDitherDiscard();
+
+                if (Config.OmapDepth)
                 {
                     Operand dest = Attribute(AttributeConsts.FragmentOutputDepth);
 
-                    Operand src = Register(_config.GetDepthRegister(), RegisterType.Gpr);
+                    Operand src = Register(Config.GetDepthRegister(), RegisterType.Gpr);
 
                     this.Copy(dest, src);
                 }
 
-                int regIndex = 0;
+                bool supportsBgra = Config.GpuAccessor.QueryHostSupportsBgraFormat();
+                int regIndexBase = 0;
 
-                for (int attachment = 0; attachment < 8; attachment++)
+                for (int rtIndex = 0; rtIndex < 8; rtIndex++)
                 {
-                    OutputMapTarget target = _config.OmapTargets[attachment];
-
                     for (int component = 0; component < 4; component++)
                     {
-                        if (target.ComponentEnabled(component))
+                        bool componentEnabled = (Config.OmapTargets & (1 << (rtIndex * 4 + component))) != 0;
+                        if (!componentEnabled)
                         {
-                            Operand dest = Attribute(AttributeConsts.FragmentOutputColorBase + attachment * 16 + component * 4);
-
-                            Operand src = Register(regIndex, RegisterType.Gpr);
-
-                            this.Copy(dest, src);
-
-                            regIndex++;
+                            continue;
                         }
+
+                        int fragmentOutputColorAttr = AttributeConsts.FragmentOutputColorBase + rtIndex * 16;
+
+                        Operand src = Register(regIndexBase + component, RegisterType.Gpr);
+
+                        // Perform B <-> R swap if needed, for BGRA formats (not supported on OpenGL).
+                        if (!supportsBgra && (component == 0 || component == 2))
+                        {
+                            Operand isBgra = Attribute(AttributeConsts.FragmentOutputIsBgraBase + rtIndex * 4);
+
+                            Operand lblIsBgra = Label();
+                            Operand lblEnd = Label();
+
+                            this.BranchIfTrue(lblIsBgra, isBgra);
+
+                            this.Copy(Attribute(fragmentOutputColorAttr + component * 4), src);
+                            this.Branch(lblEnd);
+
+                            MarkLabel(lblIsBgra);
+
+                            this.Copy(Attribute(fragmentOutputColorAttr + (2 - component) * 4), src);
+
+                            MarkLabel(lblEnd);
+                        }
+                        else
+                        {
+                            this.Copy(Attribute(fragmentOutputColorAttr + component * 4), src);
+                        }
+                    }
+
+                    bool targetEnabled = (Config.OmapTargets & (0xf << (rtIndex * 4))) != 0;
+                    if (targetEnabled)
+                    {
+                        Config.SetOutputUserAttribute(rtIndex, perPatch: false);
+                        regIndexBase += 4;
                     }
                 }
             }
+        }
+
+        private void GenerateAlphaToCoverageDitherDiscard()
+        {
+            // If alpha is not written, then we're done.
+            if ((Config.OmapTargets & 8) == 0)
+            {
+                return;
+            }
+
+            // 11 11 11 10 10 10 10 00
+            // 11 01 01 01 01 00 00 00
+            Operand ditherMask = Const(unchecked((int)0xfbb99110u));
+
+            Operand a2cDitherEndLabel = Label();
+
+            this.BranchIfFalse(a2cDitherEndLabel, Attribute(AttributeConsts.FragmentAlphaToCoverageDither));
+
+            Operand x = this.BitwiseAnd(this.FP32ConvertToU32(Attribute(AttributeConsts.PositionX)), Const(1));
+            Operand y = this.BitwiseAnd(this.FP32ConvertToU32(Attribute(AttributeConsts.PositionY)), Const(1));
+            Operand xy = this.BitwiseOr(x, this.ShiftLeft(y, Const(1)));
+
+            Operand alpha = Register(3, RegisterType.Gpr);
+            Operand scaledAlpha = this.FPMultiply(this.FPSaturate(alpha), ConstF(8));
+            Operand quantizedAlpha = this.IMinimumU32(this.FP32ConvertToU32(scaledAlpha), Const(7));
+            Operand shift = this.BitwiseOr(this.ShiftLeft(quantizedAlpha, Const(2)), xy);
+            Operand opaque = this.BitwiseAnd(this.ShiftRightU32(ditherMask, shift), Const(1));
+
+            this.BranchIfTrue(a2cDitherEndLabel, opaque);
+            this.Discard();
+            this.MarkLabel(a2cDitherEndLabel);
         }
 
         public Operation[] GetOperations()

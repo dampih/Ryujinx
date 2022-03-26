@@ -1,3 +1,4 @@
+using Ryujinx.Graphics.Shader.StructuredIr;
 using System;
 
 namespace Ryujinx.Graphics.Shader
@@ -15,9 +16,8 @@ namespace Ryujinx.Graphics.Shader
         Mask = 0xff,
 
         Array       = 1 << 8,
-        Indexed     = 1 << 9,
-        Multisample = 1 << 10,
-        Shadow      = 1 << 11
+        Multisample = 1 << 9,
+        Shadow      = 1 << 10
     }
 
     static class SamplerTypeExtensions
@@ -34,6 +34,73 @@ namespace Ryujinx.Graphics.Shader
             }
 
             throw new ArgumentException($"Invalid sampler type \"{type}\".");
+        }
+
+        public static string ToGlslSamplerType(this SamplerType type)
+        {
+            string typeName;
+
+            switch (type & SamplerType.Mask)
+            {
+                case SamplerType.Texture1D:     typeName = "sampler1D";     break;
+                case SamplerType.TextureBuffer: typeName = "samplerBuffer"; break;
+                case SamplerType.Texture2D:     typeName = "sampler2D";     break;
+                case SamplerType.Texture3D:     typeName = "sampler3D";     break;
+                case SamplerType.TextureCube:   typeName = "samplerCube";   break;
+
+                default: throw new ArgumentException($"Invalid sampler type \"{type}\".");
+            }
+
+            if ((type & SamplerType.Multisample) != 0)
+            {
+                typeName += "MS";
+            }
+
+            if ((type & SamplerType.Array) != 0)
+            {
+                typeName += "Array";
+            }
+
+            if ((type & SamplerType.Shadow) != 0)
+            {
+                typeName += "Shadow";
+            }
+
+            return typeName;
+        }
+
+        public static string ToGlslImageType(this SamplerType type, VariableType componentType)
+        {
+            string typeName;
+
+            switch (type & SamplerType.Mask)
+            {
+                case SamplerType.Texture1D:     typeName = "image1D";     break;
+                case SamplerType.TextureBuffer: typeName = "imageBuffer"; break;
+                case SamplerType.Texture2D:     typeName = "image2D";     break;
+                case SamplerType.Texture3D:     typeName = "image3D";     break;
+                case SamplerType.TextureCube:   typeName = "imageCube";   break;
+
+                default: throw new ArgumentException($"Invalid sampler type \"{type}\".");
+            }
+
+            if ((type & SamplerType.Multisample) != 0)
+            {
+                typeName += "MS";
+            }
+
+            if ((type & SamplerType.Array) != 0)
+            {
+                typeName += "Array";
+            }
+
+            switch (componentType)
+            {
+                case VariableType.U32: typeName = 'u' + typeName; break;
+                case VariableType.S32: typeName = 'i' + typeName; break;
+            }
+
+            return typeName;
         }
     }
 }

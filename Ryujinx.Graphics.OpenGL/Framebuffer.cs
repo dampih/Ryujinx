@@ -1,6 +1,8 @@
 using OpenTK.Graphics.OpenGL;
 using Ryujinx.Graphics.GAL;
+using Ryujinx.Graphics.OpenGL.Image;
 using System;
+using System.Runtime.CompilerServices;
 
 namespace Ryujinx.Graphics.OpenGL
 {
@@ -10,23 +12,37 @@ namespace Ryujinx.Graphics.OpenGL
 
         private FramebufferAttachment _lastDsAttachment;
 
+        private readonly TextureView[] _colors;
+
+        private int _colorsCount;
+        private bool _dualSourceBlend;
+
         public Framebuffer()
         {
             Handle = GL.GenFramebuffer();
+
+            _colors = new TextureView[8];
         }
 
-        public void Bind()
+        public int Bind()
         {
             GL.BindFramebuffer(FramebufferTarget.Framebuffer, Handle);
+            return Handle;
         }
 
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public void AttachColor(int index, TextureView color)
         {
-            GL.FramebufferTexture(
-                FramebufferTarget.Framebuffer,
-                FramebufferAttachment.ColorAttachment0 + index,
-                color?.Handle ?? 0,
-                0);
+            if (_colors[index] == color)
+            {
+                return;
+            }
+
+            FramebufferAttachment attachment = FramebufferAttachment.ColorAttachment0 + index;
+
+            GL.FramebufferTexture(FramebufferTarget.Framebuffer, attachment, color?.Handle ?? 0, 0);
+
+            _colors[index] = color;
         }
 
         public void AttachDepthStencil(TextureView depthStencil)
@@ -68,7 +84,35 @@ namespace Ryujinx.Graphics.OpenGL
             }
         }
 
+        public void SetDualSourceBlend(bool enable)
+        {
+            bool oldEnable = _dualSourceBlend;
+
+            _dualSourceBlend = enable;
+
+            // When dual source blend is used,
+            // we can only have one draw buffer.
+            if (enable)
+            {
+                GL.DrawBuffer(DrawBufferMode.ColorAttachment0);
+            }
+            else if (oldEnable)
+            {
+                SetDrawBuffersImpl(_colorsCount);
+            }
+        }
+
         public void SetDrawBuffers(int colorsCount)
+        {
+            if (_colorsCount != colorsCount && !_dualSourceBlend)
+            {
+                SetDrawBuffersImpl(colorsCount);
+            }
+
+            _colorsCount = colorsCount;
+        }
+
+        private void SetDrawBuffersImpl(int colorsCount)
         {
             DrawBuffersEnum[] drawBuffers = new DrawBuffersEnum[colorsCount];
 
@@ -83,14 +127,13 @@ namespace Ryujinx.Graphics.OpenGL
         private static bool IsPackedDepthStencilFormat(Format format)
         {
             return format == Format.D24UnormS8Uint ||
-                   format == Format.D32FloatS8Uint;
+                   format == Format.D32FloatS8Uint ||
+                   format == Format.S8UintD24Unorm;
         }
 
         private static bool IsDepthOnlyFormat(Format format)
         {
-            return format == Format.D16Unorm ||
-                   format == Format.D24X8Unorm ||
-                   format == Format.D32Float;
+            return format == Format.D16Unorm || format == Format.D32Float;
         }
 
         public void Dispose()

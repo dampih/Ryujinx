@@ -4,30 +4,29 @@ namespace Ryujinx.Graphics.Shader
 {
     public class ShaderProgram
     {
-        public ShaderProgramInfo Info { get; }
-
         public ShaderStage Stage { get; }
 
         public string Code { get; private set; }
+        public byte[] BinaryCode { get; }
 
-        public int Size { get; }
-
-        internal ShaderProgram(ShaderProgramInfo info, ShaderStage stage, string code, int size)
+        private ShaderProgram(ShaderStage stage)
         {
-            Info  = info;
             Stage = stage;
-            Code  = code;
-            Size  = size;
+        }
+
+        public ShaderProgram(ShaderStage stage, string code) : this(stage)
+        {
+            Code = code;
+        }
+
+        public ShaderProgram(ShaderStage stage, byte[] binaryCode) : this(stage)
+        {
+            BinaryCode = binaryCode;
         }
 
         public void Prepend(string line)
         {
             Code = line + Environment.NewLine + Code;
-        }
-
-        public void Replace(string name, string value)
-        {
-            Code = Code.Replace(name, value);
         }
     }
 }

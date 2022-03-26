@@ -24,11 +24,25 @@ namespace Ryujinx.Graphics.Shader.StructuredIr
         private int _currEndIndex;
         private int _loopEndIndex;
 
+        public StructuredFunction CurrentFunction { get; private set; }
+
         public StructuredProgramInfo Info { get; }
 
         public ShaderConfig Config { get; }
 
-        public StructuredProgramContext(int blocksCount, ShaderConfig config)
+        public StructuredProgramContext(ShaderConfig config)
+        {
+            Info = new StructuredProgramInfo();
+
+            Config = config;
+        }
+
+        public void EnterFunction(
+            int blocksCount,
+            string name,
+            VariableType returnType,
+            VariableType[] inArguments,
+            VariableType[] outArguments)
         {
             _loopTails = new HashSet<BasicBlock>();
 
@@ -45,9 +59,12 @@ namespace Ryujinx.Graphics.Shader.StructuredIr
             _currEndIndex = blocksCount;
             _loopEndIndex = blocksCount;
 
-            Info = new StructuredProgramInfo(_currBlock);
+            CurrentFunction = new StructuredFunction(_currBlock, name, returnType, inArguments, outArguments);
+        }
 
-            Config = config;
+        public void LeaveFunction()
+        {
+            Info.Functions.Add(CurrentFunction);
         }
 
         public void EnterBlock(BasicBlock block)
@@ -185,7 +202,7 @@ namespace Ryujinx.Graphics.Shader.StructuredIr
             // so it is reset to false by the "local" assignment anyway.
             if (block.Index != 0)
             {
-                Info.MainBlock.AddFirst(Assign(gotoTempAsg.Destination, Const(IrConsts.False)));
+                CurrentFunction.MainBlock.AddFirst(Assign(gotoTempAsg.Destination, Const(IrConsts.False)));
             }
         }
 
@@ -253,36 +270,22 @@ namespace Ryujinx.Graphics.Shader.StructuredIr
         {
             AstOperand newTemp = Local(type);
 
-            Info.Locals.Add(newTemp);
+            CurrentFunction.Locals.Add(newTemp);
 
             return newTemp;
         }
 
         public AstOperand GetOperandDef(Operand operand)
         {
-            if (TryGetUserAttributeIndex(operand, out int attrIndex))
-            {
-                Info.OAttributes.Add(attrIndex);
-            }
-
             return GetOperand(operand);
         }
 
         public AstOperand GetOperandUse(Operand operand)
         {
-            if (TryGetUserAttributeIndex(operand, out int attrIndex))
+            // If this flag is set, we're reading from an output attribute instead.
+            if (operand.Type.IsAttribute() && (operand.Value & AttributeConsts.LoadOutputMask) != 0)
             {
-                Info.IAttributes.Add(attrIndex);
-
-                Info.InterpolationQualifiers[attrIndex] = operand.Interpolation;
-            }
-            else if (operand.Type == OperandType.Attribute && operand.Value == AttributeConsts.InstanceId)
-            {
-                Info.UsesInstanceId = true;
-            }
-            else if (operand.Type == OperandType.ConstantBuffer)
-            {
-                Info.CBuffers.Add(operand.GetCbufSlot());
+                return GetOperandDef(operand);
             }
 
             return GetOperand(operand);
@@ -306,35 +309,10 @@ namespace Ryujinx.Graphics.Shader.StructuredIr
 
                 _localsMap.Add(operand, astOperand);
 
-                Info.Locals.Add(astOperand);
+                CurrentFunction.Locals.Add(astOperand);
             }
 
             return astOperand;
-        }
-
-        private static bool TryGetUserAttributeIndex(Operand operand, out int attrIndex)
-        {
-            if (operand.Type == OperandType.Attribute)
-            {
-                if (operand.Value >= AttributeConsts.UserAttributeBase &&
-                    operand.Value <  AttributeConsts.UserAttributeEnd)
-                {
-                    attrIndex = (operand.Value - AttributeConsts.UserAttributeBase) >> 4;
-
-                    return true;
-                }
-                else if (operand.Value >= AttributeConsts.FragmentOutputColorBase &&
-                         operand.Value <  AttributeConsts.FragmentOutputColorEnd)
-                {
-                    attrIndex = (operand.Value - AttributeConsts.FragmentOutputColorBase) >> 4;
-
-                    return true;
-                }
-            }
-
-            attrIndex = 0;
-
-            return false;
         }
     }
 }

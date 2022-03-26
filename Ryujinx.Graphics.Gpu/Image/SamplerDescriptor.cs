@@ -1,4 +1,6 @@
 using Ryujinx.Graphics.GAL;
+using System.Runtime.CompilerServices;
+using System.Runtime.Intrinsics;
 
 namespace Ryujinx.Graphics.Gpu.Image
 {
@@ -51,6 +53,7 @@ namespace Ryujinx.Graphics.Gpu.Image
 
         private const float Frac8ToF32 = 1.0f / 256.0f;
 
+#pragma warning disable CS0649
         public uint Word0;
         public uint Word1;
         public uint Word2;
@@ -59,6 +62,7 @@ namespace Ryujinx.Graphics.Gpu.Image
         public float BorderColorG;
         public float BorderColorB;
         public float BorderColorA;
+#pragma warning restore CS0649
 
         /// <summary>
         /// Unpacks the texture wrap mode along the X axis.
@@ -107,6 +111,16 @@ namespace Ryujinx.Graphics.Gpu.Image
         public CompareOp UnpackCompareOp()
         {
             return (CompareOp)(((Word0 >> 10) & 7) + 1);
+        }
+
+        public int UnpackFontFilterWidth()
+        {
+            return (int)(Word0 >> 14) & 7;
+        }
+
+        public int UnpackFontFilterHeight()
+        {
+            return (int)(Word0 >> 17) & 7;
         }
 
         /// <summary>
@@ -183,6 +197,15 @@ namespace Ryujinx.Graphics.Gpu.Image
         }
 
         /// <summary>
+        /// Unpacks the seamless cubemap flag.
+        /// </summary>
+        /// <returns>The seamless cubemap flag</returns>
+        public bool UnpackSeamlessCubemap()
+        {
+            return (Word1 & (1 << 9)) != 0;
+        }
+
+        /// <summary>
         /// Unpacks the reduction filter, used with texture minification linear filtering.
         /// This describes how the final value will be computed from neighbouring pixels.
         /// </summary>
@@ -232,6 +255,16 @@ namespace Ryujinx.Graphics.Gpu.Image
         public float UnpackMaxLod()
         {
             return ((Word2 >> 12) & 0xfff) * Frac8ToF32;
+        }
+
+        /// <summary>
+        /// Check if two descriptors are equal.
+        /// </summary>
+        /// <param name="other">The descriptor to compare against</param>
+        /// <returns>True if they are equal, false otherwise</returns>
+        public bool Equals(ref SamplerDescriptor other)
+        {
+            return Unsafe.As<SamplerDescriptor, Vector256<byte>>(ref this).Equals(Unsafe.As<SamplerDescriptor, Vector256<byte>>(ref other));
         }
     }
 }

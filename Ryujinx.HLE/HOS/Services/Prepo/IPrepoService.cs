@@ -1,57 +1,134 @@
+using MsgPack;
 using MsgPack.Serialization;
 using Ryujinx.Common;
 using Ryujinx.Common.Logging;
+using Ryujinx.Common.Utilities;
 using Ryujinx.HLE.HOS.Services.Account.Acc;
 using Ryujinx.HLE.Utilities;
-using System.Collections.Generic;
-using System.IO;
+using System;
 using System.Text;
 
 namespace Ryujinx.HLE.HOS.Services.Prepo
 {
-    [Service("prepo:a")]
-    [Service("prepo:a2")]
-    [Service("prepo:u")]
+    [Service("prepo:a",  PrepoServicePermissionLevel.Admin)] // 1.0.0-5.1.0
+    [Service("prepo:a2", PrepoServicePermissionLevel.Admin)] // 6.0.0+
+    [Service("prepo:m",  PrepoServicePermissionLevel.Manager)]
+    [Service("prepo:u",  PrepoServicePermissionLevel.User)]
+    [Service("prepo:s",  PrepoServicePermissionLevel.System)]
     class IPrepoService : IpcService
     {
-        public IPrepoService(ServiceCtx context) { }
+        private PrepoServicePermissionLevel _permission;
+        private ulong _systemSessionId;
 
-        [Command(10100)] // 1.0.0-5.1.0
-        // SaveReport(u64, pid, buffer<u8, 9>, buffer<bytes, 5>)
-        public ResultCode SaveReportOld(ServiceCtx context)
+        public IPrepoService(ServiceCtx context, PrepoServicePermissionLevel permission)
         {
+            _permission = permission;
+        }
+
+        [CommandHipc(10100)] // 1.0.0-5.1.0
+        [CommandHipc(10102)] // 6.0.0-9.2.0
+        [CommandHipc(10104)] // 10.0.0+
+        // SaveReport(u64, pid, buffer<u8, 9>, buffer<bytes, 5>)
+        public ResultCode SaveReport(ServiceCtx context)
+        {
+            if ((_permission & PrepoServicePermissionLevel.User) == 0)
+            {
+                return ResultCode.PermissionDenied;
+            }
+
             // We don't care about the differences since we don't use the play report.
             return ProcessReport(context, withUserID: false);
         }
 
-        [Command(10101)] // 1.0.0-5.1.0
-        // SaveReportWithUserOld(nn::account::Uid, u64, pid, buffer<u8, 9>, buffer<bytes, 5>)
-        public ResultCode SaveReportWithUserOld(ServiceCtx context)
+        [CommandHipc(10101)] // 1.0.0-5.1.0
+        [CommandHipc(10103)] // 6.0.0-9.2.0
+        [CommandHipc(10105)] // 10.0.0+
+        // SaveReportWithUser(nn::account::Uid, u64, pid, buffer<u8, 9>, buffer<bytes, 5>)
+        public ResultCode SaveReportWithUser(ServiceCtx context)
         {
+            if ((_permission & PrepoServicePermissionLevel.User) == 0)
+            {
+                return ResultCode.PermissionDenied;
+            }
+
             // We don't care about the differences since we don't use the play report.
             return ProcessReport(context, withUserID: true);
         }
 
-        [Command(10102)] // 6.0.0+
-        // SaveReport(u64, pid, buffer<u8, 9>, buffer<bytes, 5>)
-        public ResultCode SaveReport(ServiceCtx context)
+        [CommandHipc(10200)]
+        // RequestImmediateTransmission()
+        public ResultCode RequestImmediateTransmission(ServiceCtx context)
         {
+            // It signals an event of nn::prepo::detail::service::core::TransmissionStatusManager that requests the transmission of the report.
+            // Since we don't use reports it's fine to do nothing.
+
+            return ResultCode.Success;
+        }
+
+        [CommandHipc(10300)]
+        // GetTransmissionStatus() -> u32
+        public ResultCode GetTransmissionStatus(ServiceCtx context)
+        {
+            // It returns the transmission result of nn::prepo::detail::service::core::TransmissionStatusManager.
+            // Since we don't use reports it's fine to return ResultCode.Success.
+            context.ResponseData.Write((int)ResultCode.Success);
+
+            return ResultCode.Success;
+        }
+
+        [CommandHipc(10400)] // 9.0.0+
+        // GetSystemSessionId() -> u64
+        public ResultCode GetSystemSessionId(ServiceCtx context)
+        {
+            if ((_permission & PrepoServicePermissionLevel.User) == 0)
+            {
+                return ResultCode.PermissionDenied;
+            }
+
+            if (_systemSessionId == 0)
+            {
+                byte[] randomBuffer = new byte[8];
+
+                new Random().NextBytes(randomBuffer);
+
+                _systemSessionId = BitConverter.ToUInt64(randomBuffer, 0);
+            }
+
+            context.ResponseData.Write(_systemSessionId);
+
+            return ResultCode.Success;
+        }
+
+        [CommandHipc(20100)]
+        // SaveSystemReport(u64, pid, buffer<u8, 9>, buffer<bytes, 5>)
+        public ResultCode SaveSystemReport(ServiceCtx context)
+        {
+            if ((_permission & PrepoServicePermissionLevel.System) != 0)
+            {
+                return ResultCode.PermissionDenied;
+            }
+
             // We don't care about the differences since we don't use the play report.
             return ProcessReport(context, withUserID: false);
         }
 
-        [Command(10103)] // 6.0.0+
-        // SaveReportWithUser(nn::account::Uid, u64, pid, buffer<u8, 9>, buffer<bytes, 5>)
-        public ResultCode SaveReportWithUser(ServiceCtx context)
+        [CommandHipc(20101)]
+        // SaveSystemReportWithUser(nn::account::Uid, u64, pid, buffer<u8, 9>, buffer<bytes, 5>)
+        public ResultCode SaveSystemReportWithUser(ServiceCtx context)
         {
+            if ((_permission & PrepoServicePermissionLevel.System) != 0)
+            {
+                return ResultCode.PermissionDenied;
+            }
+
             // We don't care about the differences since we don't use the play report.
             return ProcessReport(context, withUserID: true);
         }
 
         private ResultCode ProcessReport(ServiceCtx context, bool withUserID)
         {
-            UserId  userId   = withUserID ? context.RequestData.ReadStruct<UserId>() : new UserId();
-            string  gameRoom = StringUtils.ReadUtf8String(context);
+            UserId userId   = withUserID ? context.RequestData.ReadStruct<UserId>() : new UserId();
+            string gameRoom = StringUtils.ReadUtf8String(context);
 
             if (withUserID)
             {
@@ -66,53 +143,40 @@ namespace Ryujinx.HLE.HOS.Services.Prepo
                 return ResultCode.InvalidState;
             }
 
-            long inputPosition = context.Request.SendBuff[0].Position;
-            long inputSize     = context.Request.SendBuff[0].Size;
+            ulong inputPosition = context.Request.SendBuff[0].Position;
+            ulong inputSize     = context.Request.SendBuff[0].Size;
 
             if (inputSize == 0)
             {
                 return ResultCode.InvalidBufferSize;
             }
 
-            byte[] inputBuffer = context.Memory.ReadBytes(inputPosition, inputSize);
+            byte[] inputBuffer = new byte[inputSize];
 
-            Logger.PrintInfo(LogClass.ServicePrepo, ReadReportBuffer(inputBuffer, gameRoom, userId));
+            context.Memory.Read(inputPosition, inputBuffer);
+
+            Logger.Info?.Print(LogClass.ServicePrepo, ReadReportBuffer(inputBuffer, gameRoom, userId));
 
             return ResultCode.Success;
         }
 
         private string ReadReportBuffer(byte[] buffer, string room, UserId userId)
         {
-            StringBuilder sb = new StringBuilder();
+            StringBuilder     builder            = new StringBuilder();
+            MessagePackObject deserializedReport = MessagePackSerializer.UnpackMessagePackObject(buffer);
 
-            sb.AppendLine();
-            sb.AppendLine("PlayReport log:");
+            builder.AppendLine();
+            builder.AppendLine("PlayReport log:");
 
             if (!userId.IsNull)
             {
-                sb.AppendLine($" UserId: {userId.ToString()}");
+                builder.AppendLine($" UserId: {userId}");
             }
 
-            sb.AppendLine($" Room: {room}");
+            builder.AppendLine($" Room: {room}");
+            builder.AppendLine($" Report: {MessagePackObjectFormatter.Format(deserializedReport)}");
 
-            var payload = Deserialize<IDictionary<string, object>>(buffer);
-
-            foreach (var field in payload)
-            {
-                sb.AppendLine($"  Key: {field.Key}, Value: {field.Value}");
-            }
-
-            return sb.ToString();
-        }
-
-        private static T Deserialize<T>(byte[] bytes)
-        {
-            MessagePackSerializer serializer = MessagePackSerializer.Get<T>();
-
-            using (MemoryStream byteStream = new MemoryStream(bytes))
-            {
-                return (T)serializer.Unpack(byteStream);
-            }
+            return builder.ToString();
         }
     }
 }

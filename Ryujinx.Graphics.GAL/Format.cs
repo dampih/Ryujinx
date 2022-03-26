@@ -52,12 +52,13 @@ namespace Ryujinx.Graphics.GAL
         R32G32B32A32Sint,
         S8Uint,
         D16Unorm,
-        D24X8Unorm,
+        S8UintD24Unorm,
         D32Float,
         D24UnormS8Uint,
         D32FloatS8Uint,
         R8G8B8X8Srgb,
         R8G8B8A8Srgb,
+        R4G4Unorm,
         R4G4B4A4Unorm,
         R5G5B5X1Unorm,
         R5G5B5A1Unorm,
@@ -66,11 +67,9 @@ namespace Ryujinx.Graphics.GAL
         R10G10B10A2Uint,
         R11G11B10Float,
         R9G9B9E5Float,
-        Bc1RgbUnorm,
         Bc1RgbaUnorm,
         Bc2Unorm,
         Bc3Unorm,
-        Bc1RgbSrgb,
         Bc1RgbaSrgb,
         Bc2Srgb,
         Bc3Srgb,
@@ -82,6 +81,10 @@ namespace Ryujinx.Graphics.GAL
         Bc7Srgb,
         Bc6HSfloat,
         Bc6HUfloat,
+        Etc2RgbUnorm,
+        Etc2RgbaUnorm,
+        Etc2RgbSrgb,
+        Etc2RgbaSrgb,
         R8Uscaled,
         R8Sscaled,
         R16Uscaled,
@@ -162,11 +165,21 @@ namespace Ryujinx.Graphics.GAL
 
     public static class FormatExtensions
     {
+        /// <summary>
+        /// Checks if the texture format is an ASTC format.
+        /// </summary>
+        /// <param name="format">Texture format</param>
+        /// <returns>True if the texture format is an ASTC format, false otherwise</returns>
         public static bool IsAstc(this Format format)
         {
             return format.IsAstcUnorm() || format.IsAstcSrgb();
         }
 
+        /// <summary>
+        /// Checks if the texture format is an ASTC Unorm format.
+        /// </summary>
+        /// <param name="format">Texture format</param>
+        /// <returns>True if the texture format is an ASTC Unorm format, false otherwise</returns>
         public static bool IsAstcUnorm(this Format format)
         {
             switch (format)
@@ -191,6 +204,11 @@ namespace Ryujinx.Graphics.GAL
             return false;
         }
 
+        /// <summary>
+        /// Checks if the texture format is an ASTC SRGB format.
+        /// </summary>
+        /// <param name="format">Texture format</param>
+        /// <returns>True if the texture format is an ASTC SRGB format, false otherwise</returns>
         public static bool IsAstcSrgb(this Format format)
         {
             switch (format)
@@ -213,6 +231,121 @@ namespace Ryujinx.Graphics.GAL
             }
 
             return false;
+        }
+
+        /// <summary>
+        /// Checks if the texture format is a BGR format.
+        /// </summary>
+        /// <param name="format">Texture format</param>
+        /// <returns>True if the texture format is a BGR format, false otherwise</returns>
+        public static bool IsBgr(this Format format)
+        {
+            switch (format)
+            {
+                case Format.B5G6R5Unorm:
+                case Format.B5G5R5X1Unorm:
+                case Format.B5G5R5A1Unorm:
+                case Format.B8G8R8X8Unorm:
+                case Format.B8G8R8A8Unorm:
+                case Format.B8G8R8X8Srgb:
+                case Format.B8G8R8A8Srgb:
+                    return true;
+            }
+
+            return false;
+        }
+
+        /// <summary>
+        /// Checks if the texture format is a depth, stencil or depth-stencil format.
+        /// </summary>
+        /// <param name="format">Texture format</param>
+        /// <returns>True if the format is a depth, stencil or depth-stencil format, false otherwise</returns>
+        public static bool IsDepthOrStencil(this Format format)
+        {
+            switch (format)
+            {
+                case Format.D16Unorm:
+                case Format.D24UnormS8Uint:
+                case Format.S8UintD24Unorm:
+                case Format.D32Float:
+                case Format.D32FloatS8Uint:
+                case Format.S8Uint:
+                    return true;
+            }
+
+            return false;
+        }
+
+        /// <summary>
+        /// Checks if the texture format is an unsigned integer color format.
+        /// </summary>
+        /// <param name="format">Texture format</param>
+        /// <returns>True if the texture format is an unsigned integer color format, false otherwise</returns>
+        public static bool IsUint(this Format format)
+        {
+            switch (format)
+            {
+                case Format.R8Uint:
+                case Format.R16Uint:
+                case Format.R32Uint:
+                case Format.R8G8Uint:
+                case Format.R16G16Uint:
+                case Format.R32G32Uint:
+                case Format.R8G8B8Uint:
+                case Format.R16G16B16Uint:
+                case Format.R32G32B32Uint:
+                case Format.R8G8B8A8Uint:
+                case Format.R16G16B16A16Uint:
+                case Format.R32G32B32A32Uint:
+                case Format.R10G10B10A2Uint:
+                case Format.R8G8B8X8Uint:
+                case Format.R16G16B16X16Uint:
+                case Format.R32G32B32X32Uint:
+                    return true;
+            }
+
+            return false;
+        }
+
+        /// <summary>
+        /// Checks if the texture format is a signed integer color format.
+        /// </summary>
+        /// <param name="format">Texture format</param>
+        /// <returns>True if the texture format is a signed integer color format, false otherwise</returns>
+        public static bool IsSint(this Format format)
+        {
+            switch (format)
+            {
+                case Format.R8Sint:
+                case Format.R16Sint:
+                case Format.R32Sint:
+                case Format.R8G8Sint:
+                case Format.R16G16Sint:
+                case Format.R32G32Sint:
+                case Format.R8G8B8Sint:
+                case Format.R16G16B16Sint:
+                case Format.R32G32B32Sint:
+                case Format.R8G8B8A8Sint:
+                case Format.R16G16B16A16Sint:
+                case Format.R32G32B32A32Sint:
+                case Format.R10G10B10A2Sint:
+                case Format.R8G8B8X8Sint:
+                case Format.R16G16B16X16Sint:
+                case Format.R32G32B32X32Sint:
+                    return true;
+            }
+
+            return false;
+        }
+
+        /// <summary>
+        /// Checks if the texture format is an integer color format.
+        /// </summary>
+        /// <param name="format">Texture format</param>
+        /// <returns>True if the texture format is an integer color format, false otherwise</returns>
+        public static bool IsInteger(this Format format)
+        {
+            return format.IsUint() || format.IsSint();
         }
     }
 }

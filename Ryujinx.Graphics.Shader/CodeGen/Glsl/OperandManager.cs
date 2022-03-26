@@ -3,6 +3,7 @@ using Ryujinx.Graphics.Shader.StructuredIr;
 using Ryujinx.Graphics.Shader.Translation;
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 
 using static Ryujinx.Graphics.Shader.StructuredIr.InstructionInfo;
 
@@ -28,42 +29,64 @@ namespace Ryujinx.Graphics.Shader.CodeGen.Glsl
         private static Dictionary<int, BuiltInAttribute> _builtInAttributes =
                    new Dictionary<int, BuiltInAttribute>()
         {
-            { AttributeConsts.Layer,               new BuiltInAttribute("gl_Layer",           VariableType.S32)  },
-            { AttributeConsts.PointSize,           new BuiltInAttribute("gl_PointSize",       VariableType.F32)  },
-            { AttributeConsts.PositionX,           new BuiltInAttribute("gl_Position.x",      VariableType.F32)  },
-            { AttributeConsts.PositionY,           new BuiltInAttribute("gl_Position.y",      VariableType.F32)  },
-            { AttributeConsts.PositionZ,           new BuiltInAttribute("gl_Position.z",      VariableType.F32)  },
-            { AttributeConsts.PositionW,           new BuiltInAttribute("gl_Position.w",      VariableType.F32)  },
-            { AttributeConsts.ClipDistance0,       new BuiltInAttribute("gl_ClipDistance[0]", VariableType.F32)  },
-            { AttributeConsts.ClipDistance1,       new BuiltInAttribute("gl_ClipDistance[1]", VariableType.F32)  },
-            { AttributeConsts.ClipDistance2,       new BuiltInAttribute("gl_ClipDistance[2]", VariableType.F32)  },
-            { AttributeConsts.ClipDistance3,       new BuiltInAttribute("gl_ClipDistance[3]", VariableType.F32)  },
-            { AttributeConsts.ClipDistance4,       new BuiltInAttribute("gl_ClipDistance[4]", VariableType.F32)  },
-            { AttributeConsts.ClipDistance5,       new BuiltInAttribute("gl_ClipDistance[5]", VariableType.F32)  },
-            { AttributeConsts.ClipDistance6,       new BuiltInAttribute("gl_ClipDistance[6]", VariableType.F32)  },
-            { AttributeConsts.ClipDistance7,       new BuiltInAttribute("gl_ClipDistance[7]", VariableType.F32)  },
-            { AttributeConsts.PointCoordX,         new BuiltInAttribute("gl_PointCoord.x",    VariableType.F32)  },
-            { AttributeConsts.PointCoordY,         new BuiltInAttribute("gl_PointCoord.y",    VariableType.F32)  },
-            { AttributeConsts.TessCoordX,          new BuiltInAttribute("gl_TessCoord.x",     VariableType.F32)  },
-            { AttributeConsts.TessCoordY,          new BuiltInAttribute("gl_TessCoord.y",     VariableType.F32)  },
-            { AttributeConsts.InstanceId,          new BuiltInAttribute("gl_InstanceID",      VariableType.S32)  },
-            { AttributeConsts.VertexId,            new BuiltInAttribute("gl_VertexID",        VariableType.S32)  },
-            { AttributeConsts.FrontFacing,         new BuiltInAttribute("gl_FrontFacing",     VariableType.Bool) },
+            { AttributeConsts.TessLevelOuter0, new BuiltInAttribute("gl_TessLevelOuter[0]", VariableType.F32)  },
+            { AttributeConsts.TessLevelOuter1, new BuiltInAttribute("gl_TessLevelOuter[1]", VariableType.F32)  },
+            { AttributeConsts.TessLevelOuter2, new BuiltInAttribute("gl_TessLevelOuter[2]", VariableType.F32)  },
+            { AttributeConsts.TessLevelOuter3, new BuiltInAttribute("gl_TessLevelOuter[3]", VariableType.F32)  },
+            { AttributeConsts.TessLevelInner0, new BuiltInAttribute("gl_TessLevelInner[0]", VariableType.F32)  },
+            { AttributeConsts.TessLevelInner1, new BuiltInAttribute("gl_TessLevelInner[1]", VariableType.F32)  },
+            { AttributeConsts.Layer,           new BuiltInAttribute("gl_Layer",             VariableType.S32)  },
+            { AttributeConsts.PointSize,       new BuiltInAttribute("gl_PointSize",         VariableType.F32)  },
+            { AttributeConsts.PositionX,       new BuiltInAttribute("gl_Position.x",        VariableType.F32)  },
+            { AttributeConsts.PositionY,       new BuiltInAttribute("gl_Position.y",        VariableType.F32)  },
+            { AttributeConsts.PositionZ,       new BuiltInAttribute("gl_Position.z",        VariableType.F32)  },
+            { AttributeConsts.PositionW,       new BuiltInAttribute("gl_Position.w",        VariableType.F32)  },
+            { AttributeConsts.ClipDistance0,   new BuiltInAttribute("gl_ClipDistance[0]",   VariableType.F32)  },
+            { AttributeConsts.ClipDistance1,   new BuiltInAttribute("gl_ClipDistance[1]",   VariableType.F32)  },
+            { AttributeConsts.ClipDistance2,   new BuiltInAttribute("gl_ClipDistance[2]",   VariableType.F32)  },
+            { AttributeConsts.ClipDistance3,   new BuiltInAttribute("gl_ClipDistance[3]",   VariableType.F32)  },
+            { AttributeConsts.ClipDistance4,   new BuiltInAttribute("gl_ClipDistance[4]",   VariableType.F32)  },
+            { AttributeConsts.ClipDistance5,   new BuiltInAttribute("gl_ClipDistance[5]",   VariableType.F32)  },
+            { AttributeConsts.ClipDistance6,   new BuiltInAttribute("gl_ClipDistance[6]",   VariableType.F32)  },
+            { AttributeConsts.ClipDistance7,   new BuiltInAttribute("gl_ClipDistance[7]",   VariableType.F32)  },
+            { AttributeConsts.PointCoordX,     new BuiltInAttribute("gl_PointCoord.x",      VariableType.F32)  },
+            { AttributeConsts.PointCoordY,     new BuiltInAttribute("gl_PointCoord.y",      VariableType.F32)  },
+            { AttributeConsts.TessCoordX,      new BuiltInAttribute("gl_TessCoord.x",       VariableType.F32)  },
+            { AttributeConsts.TessCoordY,      new BuiltInAttribute("gl_TessCoord.y",       VariableType.F32)  },
+            { AttributeConsts.InstanceId,      new BuiltInAttribute("gl_InstanceID",        VariableType.S32)  },
+            { AttributeConsts.VertexId,        new BuiltInAttribute("gl_VertexID",          VariableType.S32)  },
+            { AttributeConsts.FrontFacing,     new BuiltInAttribute("gl_FrontFacing",       VariableType.Bool) },
 
             // Special.
-            { AttributeConsts.FragmentOutputDepth, new BuiltInAttribute("gl_FragDepth",                           VariableType.F32) },
-            { AttributeConsts.ThreadIdX,           new BuiltInAttribute("gl_LocalInvocationID.x",                 VariableType.U32) },
-            { AttributeConsts.ThreadIdY,           new BuiltInAttribute("gl_LocalInvocationID.y",                 VariableType.U32) },
-            { AttributeConsts.ThreadIdZ,           new BuiltInAttribute("gl_LocalInvocationID.z",                 VariableType.U32) },
-            { AttributeConsts.CtaIdX,              new BuiltInAttribute("gl_WorkGroupID.x",                       VariableType.U32) },
-            { AttributeConsts.CtaIdY,              new BuiltInAttribute("gl_WorkGroupID.y",                       VariableType.U32) },
-            { AttributeConsts.CtaIdZ,              new BuiltInAttribute("gl_WorkGroupID.z",                       VariableType.U32) },
-            { AttributeConsts.LaneId,              new BuiltInAttribute("gl_SubGroupInvocationARB",               VariableType.U32) },
-            { AttributeConsts.EqMask,              new BuiltInAttribute("unpackUint2x32(gl_SubGroupEqMaskARB).x", VariableType.U32) },
-            { AttributeConsts.GeMask,              new BuiltInAttribute("unpackUint2x32(gl_SubGroupGeMaskARB).x", VariableType.U32) },
-            { AttributeConsts.GtMask,              new BuiltInAttribute("unpackUint2x32(gl_SubGroupGtMaskARB).x", VariableType.U32) },
-            { AttributeConsts.LeMask,              new BuiltInAttribute("unpackUint2x32(gl_SubGroupLeMaskARB).x", VariableType.U32) },
-            { AttributeConsts.LtMask,              new BuiltInAttribute("unpackUint2x32(gl_SubGroupLtMaskARB).x", VariableType.U32) },
+            { AttributeConsts.FragmentOutputDepth, new BuiltInAttribute("gl_FragDepth",           VariableType.F32)  },
+            { AttributeConsts.ThreadKill,          new BuiltInAttribute("gl_HelperInvocation",    VariableType.Bool) },
+            { AttributeConsts.ThreadIdX,           new BuiltInAttribute("gl_LocalInvocationID.x", VariableType.U32)  },
+            { AttributeConsts.ThreadIdY,           new BuiltInAttribute("gl_LocalInvocationID.y", VariableType.U32)  },
+            { AttributeConsts.ThreadIdZ,           new BuiltInAttribute("gl_LocalInvocationID.z", VariableType.U32)  },
+            { AttributeConsts.CtaIdX,              new BuiltInAttribute("gl_WorkGroupID.x",       VariableType.U32)  },
+            { AttributeConsts.CtaIdY,              new BuiltInAttribute("gl_WorkGroupID.y",       VariableType.U32)  },
+            { AttributeConsts.CtaIdZ,              new BuiltInAttribute("gl_WorkGroupID.z",       VariableType.U32)  },
+            { AttributeConsts.LaneId,              new BuiltInAttribute(null,                     VariableType.U32)  },
+            { AttributeConsts.InvocationId,        new BuiltInAttribute("gl_InvocationID",        VariableType.S32)  },
+            { AttributeConsts.PrimitiveId,         new BuiltInAttribute("gl_PrimitiveID",         VariableType.S32)  },
+            { AttributeConsts.PatchVerticesIn,     new BuiltInAttribute("gl_PatchVerticesIn",     VariableType.S32)  },
+            { AttributeConsts.EqMask,              new BuiltInAttribute(null,                     VariableType.U32)  },
+            { AttributeConsts.GeMask,              new BuiltInAttribute(null,                     VariableType.U32)  },
+            { AttributeConsts.GtMask,              new BuiltInAttribute(null,                     VariableType.U32)  },
+            { AttributeConsts.LeMask,              new BuiltInAttribute(null,                     VariableType.U32)  },
+            { AttributeConsts.LtMask,              new BuiltInAttribute(null,                     VariableType.U32)  },
+
+            // Support uniforms.
+            { AttributeConsts.FragmentAlphaToCoverageDither, new BuiltInAttribute(DefaultNames.SupportBlockAlphaToCoverageDitherName, VariableType.U32) },
+
+            { AttributeConsts.FragmentOutputIsBgraBase + 0,  new BuiltInAttribute($"{DefaultNames.SupportBlockIsBgraName}[0]",  VariableType.Bool) },
+            { AttributeConsts.FragmentOutputIsBgraBase + 4,  new BuiltInAttribute($"{DefaultNames.SupportBlockIsBgraName}[1]",  VariableType.Bool) },
+            { AttributeConsts.FragmentOutputIsBgraBase + 8,  new BuiltInAttribute($"{DefaultNames.SupportBlockIsBgraName}[2]",  VariableType.Bool) },
+            { AttributeConsts.FragmentOutputIsBgraBase + 12, new BuiltInAttribute($"{DefaultNames.SupportBlockIsBgraName}[3]",  VariableType.Bool) },
+            { AttributeConsts.FragmentOutputIsBgraBase + 16, new BuiltInAttribute($"{DefaultNames.SupportBlockIsBgraName}[4]",  VariableType.Bool) },
+            { AttributeConsts.FragmentOutputIsBgraBase + 20, new BuiltInAttribute($"{DefaultNames.SupportBlockIsBgraName}[5]",  VariableType.Bool) },
+            { AttributeConsts.FragmentOutputIsBgraBase + 24, new BuiltInAttribute($"{DefaultNames.SupportBlockIsBgraName}[6]",  VariableType.Bool) },
+            { AttributeConsts.FragmentOutputIsBgraBase + 28, new BuiltInAttribute($"{DefaultNames.SupportBlockIsBgraName}[7]",  VariableType.Bool) }
         };
 
         private Dictionary<AstOperand, string> _locals;
@@ -82,66 +105,72 @@ namespace Ryujinx.Graphics.Shader.CodeGen.Glsl
             return name;
         }
 
-        public string GetExpression(AstOperand operand, ShaderStage stage)
+        public string GetExpression(AstOperand operand, ShaderConfig config)
         {
-            switch (operand.Type)
+            return operand.Type switch
             {
-                case OperandType.Attribute:
-                    return GetAttributeName(operand, stage);
+                OperandType.Argument => GetArgumentName(operand.Value),
+                OperandType.Attribute => GetAttributeName(operand.Value, config, perPatch: false),
+                OperandType.AttributePerPatch => GetAttributeName(operand.Value, config, perPatch: true),
+                OperandType.Constant => NumberFormatter.FormatInt(operand.Value),
+                OperandType.ConstantBuffer => GetConstantBufferName(operand, config),
+                OperandType.LocalVariable => _locals[operand],
+                OperandType.Undefined => DefaultNames.UndefinedName,
+                _ => throw new ArgumentException($"Invalid operand type \"{operand.Type}\".")
+            };
+        }
 
-                case OperandType.Constant:
-                    return NumberFormatter.FormatInt(operand.Value);
+        private static string GetConstantBufferName(AstOperand operand, ShaderConfig config)
+        {
+            return GetConstantBufferName(operand.CbufSlot, operand.CbufOffset, config.Stage, config.UsedFeatures.HasFlag(FeatureFlags.CbIndexing));
+        }
 
-                case OperandType.ConstantBuffer:
-                    return GetConstantBufferName(operand.CbufSlot, operand.CbufOffset, stage);
+        public static string GetConstantBufferName(int slot, int offset, ShaderStage stage, bool cbIndexable)
+        {
+            return $"{GetUbName(stage, slot, cbIndexable)}[{offset >> 2}].{GetSwizzleMask(offset & 3)}";
+        }
 
-                case OperandType.LocalVariable:
-                    return _locals[operand];
-
-                case OperandType.Undefined:
-                    return DefaultNames.UndefinedName;
+        private static string GetVec4Indexed(string vectorName, string indexExpr, bool indexElement)
+        {
+            if (indexElement)
+            {
+                return $"{vectorName}[{indexExpr}]";
             }
 
-            throw new ArgumentException($"Invalid operand type \"{operand.Type}\".");
+            string result = $"{vectorName}.x";
+            for (int i = 1; i < 4; i++)
+            {
+                result = $"(({indexExpr}) == {i}) ? ({vectorName}.{GetSwizzleMask(i)}) : ({result})";
+            }
+            return $"({result})";
         }
 
-        public static string GetConstantBufferName(int slot, int offset, ShaderStage stage)
+        public static string GetConstantBufferName(int slot, string offsetExpr, ShaderStage stage, bool cbIndexable, bool indexElement)
         {
-            string ubName = GetUbName(stage, slot);
-
-            ubName += "[" + (offset >> 2) + "]";
-
-            return ubName + "." + GetSwizzleMask(offset & 3);
+            return GetVec4Indexed(GetUbName(stage, slot, cbIndexable) + $"[{offsetExpr} >> 2]", offsetExpr + " & 3", indexElement);
         }
 
-        public static string GetConstantBufferName(IAstNode slot, string offsetExpr, ShaderStage stage)
+        public static string GetConstantBufferName(string slotExpr, string offsetExpr, ShaderStage stage, bool indexElement)
         {
-            // Non-constant slots are not supported.
-            // It is expected that upstream stages are never going to generate non-constant
-            // slot access.
-            AstOperand operand = (AstOperand)slot;
-
-            string ubName = GetUbName(stage, operand.Value);
-
-            string index0 = "[" + offsetExpr + " >> 2]";
-            string index1 = "[" + offsetExpr + " & 3]";
-
-            return ubName + index0 + index1;
+            return GetVec4Indexed(GetUbName(stage, slotExpr) + $"[{offsetExpr} >> 2]", offsetExpr + " & 3", indexElement);
         }
 
-        public static string GetOutAttributeName(AstOperand attr, ShaderStage stage)
+        public static string GetOutAttributeName(int value, ShaderConfig config, bool perPatch)
         {
-            return GetAttributeName(attr, stage, isOutAttr: true);
+            return GetAttributeName(value, config, perPatch, isOutAttr: true);
         }
 
-        public static string GetAttributeName(AstOperand attr, ShaderStage stage, bool isOutAttr = false, string indexExpr = "0")
+        public static string GetAttributeName(int value, ShaderConfig config, bool perPatch, bool isOutAttr = false, string indexExpr = "0")
         {
-            int value = attr.Value;
+            if ((value & AttributeConsts.LoadOutputMask) != 0)
+            {
+                isOutAttr = true;
+            }
 
-            string swzMask = GetSwizzleMask((value >> 2) & 3);
+            value &= AttributeConsts.Mask & ~3;
+            char swzMask = GetSwizzleMask((value >> 2) & 3);
 
-            if (value >= AttributeConsts.UserAttributeBase &&
-                value <  AttributeConsts.UserAttributeEnd)
+            if (value >= AttributeConsts.UserAttributeBase && value < AttributeConsts.UserAttributeEnd)
             {
                 value -= AttributeConsts.UserAttributeBase;
 
@@ -149,45 +178,106 @@ namespace Ryujinx.Graphics.Shader.CodeGen.Glsl
                     ? DefaultNames.OAttributePrefix
                     : DefaultNames.IAttributePrefix;
 
-                string name = $"{prefix}{(value >> 4)}";
+                bool indexable = config.UsedFeatures.HasFlag(isOutAttr ? FeatureFlags.OaIndexing : FeatureFlags.IaIndexing);
 
-                if (stage == ShaderStage.Geometry && !isOutAttr)
+                if (!indexable && perPatch)
                 {
-                    name += $"[{indexExpr}]";
+                    prefix = DefaultNames.PerPatchAttributePrefix;
                 }
 
-                name += "." + swzMask;
+                if (indexable)
+                {
+                    string name = prefix;
 
-                return name;
+                    if (config.Stage == ShaderStage.Geometry && !isOutAttr)
+                    {
+                        name += $"[{indexExpr}]";
+                    }
+
+                    return name + $"[{(value >> 4)}]." + swzMask;
+                }
+                else if (config.TransformFeedbackEnabled && (config.Stage != ShaderStage.Vertex || isOutAttr))
+                {
+                    string name = $"{prefix}{(value >> 4)}_{swzMask}";
+
+                    if (!perPatch && IsArrayAttribute(config.Stage, isOutAttr))
+                    {
+                        name += isOutAttr ? "[gl_InvocationID]" : $"[{indexExpr}]";
+                    }
+
+                    return name;
+                }
+                else
+                {
+                    string name = $"{prefix}{(value >> 4)}";
+
+                    if (!perPatch && IsArrayAttribute(config.Stage, isOutAttr))
+                    {
+                        name += isOutAttr ? "[gl_InvocationID]" : $"[{indexExpr}]";
+                    }
+
+                    return name + '.' + swzMask;
+                }
             }
             else
             {
-                if (value >= AttributeConsts.FragmentOutputColorBase &&
-                    value <  AttributeConsts.FragmentOutputColorEnd)
+                if (value >= AttributeConsts.FragmentOutputColorBase && value < AttributeConsts.FragmentOutputColorEnd)
                 {
                     value -= AttributeConsts.FragmentOutputColorBase;
 
                     return $"{DefaultNames.OAttributePrefix}{(value >> 4)}.{swzMask}";
                 }
-                else if (_builtInAttributes.TryGetValue(value & ~3, out BuiltInAttribute builtInAttr))
+                else if (_builtInAttributes.TryGetValue(value, out BuiltInAttribute builtInAttr))
                 {
-                    // TODO: There must be a better way to handle this...
-                    if (stage == ShaderStage.Fragment)
+                    string subgroupMask = value switch
                     {
-                        switch (value & ~3)
+                        AttributeConsts.EqMask => "Eq",
+                        AttributeConsts.GeMask => "Ge",
+                        AttributeConsts.GtMask => "Gt",
+                        AttributeConsts.LeMask => "Le",
+                        AttributeConsts.LtMask => "Lt",
+                        _ => null
+                    };
+
+                    if (subgroupMask != null)
+                    {
+                        return config.GpuAccessor.QueryHostSupportsShaderBallot()
+                            ? $"unpackUint2x32(gl_SubGroup{subgroupMask}MaskARB).x"
+                            : $"gl_Subgroup{subgroupMask}Mask.x";
+                    }
+                    else if (value == AttributeConsts.LaneId)
+                    {
+                        return config.GpuAccessor.QueryHostSupportsShaderBallot()
+                            ? "gl_SubGroupInvocationARB"
+                            : "gl_SubgroupInvocationID";
+                    }
+
+                    // TODO: There must be a better way to handle this...
+                    if (config.Stage == ShaderStage.Fragment)
+                    {
+                        switch (value)
                         {
-                            case AttributeConsts.PositionX: return "gl_FragCoord.x";
-                            case AttributeConsts.PositionY: return "gl_FragCoord.y";
+                            case AttributeConsts.PositionX: return $"(gl_FragCoord.x / {DefaultNames.SupportBlockRenderScaleName}[0])";
+                            case AttributeConsts.PositionY: return $"(gl_FragCoord.y / {DefaultNames.SupportBlockRenderScaleName}[0])";
                             case AttributeConsts.PositionZ: return "gl_FragCoord.z";
-                            case AttributeConsts.PositionW: return "1.0";
+                            case AttributeConsts.PositionW: return "gl_FragCoord.w";
+
+                            case AttributeConsts.FrontFacing:
+                                if (config.GpuAccessor.QueryHostHasFrontFacingBug())
+                                {
+                                    // This is required for Intel on Windows, gl_FrontFacing sometimes returns incorrect
+                                    // (flipped) values. Doing this seems to fix it.
+                                    return "(-floatBitsToInt(float(gl_FrontFacing)) < 0)";
+                                }
+                                break;
                         }
                     }
 
                     string name = builtInAttr.Name;
 
-                    if (stage == ShaderStage.Geometry && !isOutAttr)
+                    if (!perPatch && IsArrayAttribute(config.Stage, isOutAttr) && IsArrayBuiltIn(value))
                     {
-                        name = $"gl_in[{indexExpr}].{name}";
+                        name = isOutAttr ? $"gl_out[gl_InvocationID].{name}" : $"gl_in[{indexExpr}].{name}";
                     }
 
                     return name;
@@ -199,46 +289,83 @@ namespace Ryujinx.Graphics.Shader.CodeGen.Glsl
             return isOutAttr ? "// bad_attr0x" + value.ToString("X") : "0.0";
         }
 
-        public static string GetUbName(ShaderStage stage, int slot)
+        public static string GetAttributeName(string attrExpr, ShaderConfig config, bool isOutAttr = false, string indexExpr = "0")
         {
-            string ubName = GetShaderStagePrefix(stage);
+            string name = isOutAttr
+                ? DefaultNames.OAttributePrefix
+                : DefaultNames.IAttributePrefix;
 
-            ubName += "_" + DefaultNames.UniformNamePrefix + slot;
+            if (config.Stage == ShaderStage.Geometry && !isOutAttr)
+            {
+                name += $"[{indexExpr}]";
+            }
 
-            return ubName + "_" + DefaultNames.UniformNameSuffix;
+            return $"{name}[{attrExpr} >> 2][{attrExpr} & 3]";
         }
 
-        public static string GetSamplerName(ShaderStage stage, AstTextureOperation texOp, string indexExpr)
+        public static bool IsArrayAttribute(ShaderStage stage, bool isOutAttr)
         {
-            string suffix;
-
-            if ((texOp.Flags & TextureFlags.Bindless) != 0)
+            if (isOutAttr)
             {
-                AstOperand operand = texOp.GetSource(0) as AstOperand;
-
-                suffix = "_cb" + operand.CbufSlot + "_" + operand.CbufOffset;
+                return stage == ShaderStage.TessellationControl;
             }
             else
             {
-                suffix = texOp.Handle.ToString();
-
-                if ((texOp.Type & SamplerType.Indexed) != 0)
-                {
-                    suffix += $"a[{indexExpr}]";
-                }
+                return stage == ShaderStage.TessellationControl ||
+                       stage == ShaderStage.TessellationEvaluation ||
+                       stage == ShaderStage.Geometry;
             }
+        }
+
+        private static bool IsArrayBuiltIn(int attr)
+        {
+            if (attr <= AttributeConsts.TessLevelInner1 ||
+                attr == AttributeConsts.TessCoordX ||
+                attr == AttributeConsts.TessCoordY)
+            {
+                return false;
+            }
+
+            return (attr & AttributeConsts.SpecialMask) == 0;
+        }
+
+        public static string GetUbName(ShaderStage stage, int slot, bool cbIndexable)
+        {
+            if (cbIndexable)
+            {
+                return GetUbName(stage, NumberFormatter.FormatInt(slot, VariableType.S32));
+            }
+
+            return $"{GetShaderStagePrefix(stage)}_{DefaultNames.UniformNamePrefix}{slot}_{DefaultNames.UniformNameSuffix}";
+        }
+
+        private static string GetUbName(ShaderStage stage, string slotExpr)
+        {
+            return $"{GetShaderStagePrefix(stage)}_{DefaultNames.UniformNamePrefix}[{slotExpr}].{DefaultNames.DataName}";
+        }
+
+        public static string GetSamplerName(ShaderStage stage, AstTextureOperation texOp)
+        {
+            return GetSamplerName(stage, texOp.CbufSlot, texOp.Handle);
+        }
+
+        public static string GetSamplerName(ShaderStage stage, int cbufSlot, int handle)
+        {
+            string suffix = cbufSlot < 0 ? $"_tcb_{handle:X}" : $"_cb{cbufSlot}_{handle:X}";
 
             return GetShaderStagePrefix(stage) + "_" + DefaultNames.SamplerNamePrefix + suffix;
         }
 
-        public static string GetImageName(ShaderStage stage, AstTextureOperation texOp, string indexExpr)
+        public static string GetImageName(ShaderStage stage, AstTextureOperation texOp)
         {
-            string suffix = texOp.Handle.ToString();
+            return GetImageName(stage, texOp.CbufSlot, texOp.Handle, texOp.Format);
+        }
 
-            if ((texOp.Type & SamplerType.Indexed) != 0)
-            {
-                suffix += $"a[{indexExpr}]";
-            }
+        public static string GetImageName(ShaderStage stage, int cbufSlot, int handle, TextureFormat format)
+        {
+            string suffix = cbufSlot < 0
+                ? $"_tcb_{handle:X}_{format.ToGlslFormat()}"
+                : $"_cb{cbufSlot}_{handle:X}_{format.ToGlslFormat()}";
 
             return GetShaderStagePrefix(stage) + "_" + DefaultNames.ImageNamePrefix + suffix;
         }
@@ -255,27 +382,62 @@ namespace Ryujinx.Graphics.Shader.CodeGen.Glsl
             return _stagePrefixes[index];
         }
 
-        private static string GetSwizzleMask(int value)
+        private static char GetSwizzleMask(int value)
         {
-            return "xyzw".Substring(value, 1);
+            return "xyzw"[value];
         }
 
-        public static VariableType GetNodeDestType(IAstNode node)
+        public static string GetArgumentName(int argIndex)
+        {
+            return $"{DefaultNames.ArgumentNamePrefix}{argIndex}";
+        }
+
+        public static VariableType GetNodeDestType(CodeGenContext context, IAstNode node)
         {
             if (node is AstOperation operation)
             {
-                // Load attribute basically just returns the attribute value.
-                // Some built-in attributes may have different types, so we need
-                // to return the type based on the attribute that is being read.
                 if (operation.Inst == Instruction.LoadAttribute)
                 {
-                    return GetOperandVarType((AstOperand)operation.GetSource(0));
+                    // Load attribute basically just returns the attribute value.
+                    // Some built-in attributes may have different types, so we need
+                    // to return the type based on the attribute that is being read.
+                    if (operation.GetSource(0) is AstOperand operand && operand.Type == OperandType.Constant)
+                    {
+                        if (_builtInAttributes.TryGetValue(operand.Value & ~3, out BuiltInAttribute builtInAttr))
+                        {
+                            return builtInAttr.Type;
+                        }
+                    }
+
+                    return OperandInfo.GetVarType(OperandType.Attribute);
+                }
+                else if (operation.Inst == Instruction.Call)
+                {
+                    AstOperand funcId = (AstOperand)operation.GetSource(0);
+
+                    Debug.Assert(funcId.Type == OperandType.Constant);
+
+                    return context.GetFunction(funcId.Value).ReturnType;
+                }
+                else if (operation is AstTextureOperation texOp &&
+                         (texOp.Inst == Instruction.ImageLoad ||
+                          texOp.Inst == Instruction.ImageStore ||
+                          texOp.Inst == Instruction.ImageAtomic))
+                {
+                    return texOp.Format.GetComponentType();
                 }
 
                 return GetDestVarType(operation.Inst);
             }
             else if (node is AstOperand operand)
             {
+                if (operand.Type == OperandType.Argument)
+                {
+                    int argIndex = operand.Value;
+
+                    return context.CurrentFunction.GetArgumentType(argIndex);
+                }
+
                 return GetOperandVarType(operand);
             }
             else
