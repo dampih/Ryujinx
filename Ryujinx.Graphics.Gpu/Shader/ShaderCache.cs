@@ -94,13 +94,13 @@ namespace Ryujinx.Graphics.Gpu.Shader
 
             _programsToSaveQueue = new Queue<ProgramToSave>();
 
-            string diskCachePath = GraphicsConfig.EnableShaderCache && GraphicsConfig.TitleId != null
+            string diskCacheTitleId = GraphicsConfig.EnableShaderCache && GraphicsConfig.TitleId != null
                 ? CacheHelper.GetBaseCacheDirectory(GraphicsConfig.TitleId)
                 : null;
 
             _computeShaderCache = new ComputeShaderCacheHashTable();
             _graphicsShaderCache = new ShaderCacheHashTable();
-            _diskCacheHostStorage = new DiskCacheHostStorage(diskCachePath);
+            _diskCacheHostStorage = new DiskCacheHostStorage(diskCacheTitleId);
 
             if (_diskCacheHostStorage.CacheEnabled)
             {
@@ -599,12 +599,12 @@ namespace Ryujinx.Graphics.Gpu.Shader
         /// </summary>
         public void Dispose()
         {
-            foreach (CachedShaderProgram program in _cpPrograms.Values)
+            foreach (CachedShaderProgram program in _graphicsShaderCache.GetPrograms())
             {
                 program.Dispose();
             }
 
-            foreach (CachedShaderProgram program in _gpPrograms.Values)
+            foreach (CachedShaderProgram program in _computeShaderCache.GetPrograms())
             {
                 program.Dispose();
             }
