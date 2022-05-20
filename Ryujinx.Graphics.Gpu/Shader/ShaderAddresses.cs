@@ -1,4 +1,6 @@
 using System;
+using System.Runtime.CompilerServices;
+using System.Runtime.InteropServices;
 
 namespace Ryujinx.Graphics.Gpu.Shader
 {
@@ -7,12 +9,14 @@ namespace Ryujinx.Graphics.Gpu.Shader
     /// </summary>
     struct ShaderAddresses : IEquatable<ShaderAddresses>
     {
+#pragma warning disable CS0649
         public ulong VertexA;
-        public ulong Vertex;
+        public ulong VertexB;
         public ulong TessControl;
         public ulong TessEvaluation;
         public ulong Geometry;
         public ulong Fragment;
+#pragma warning restore CS0649
 
         /// <summary>
         /// Check if the addresses are equal.
@@ -32,7 +36,7 @@ namespace Ryujinx.Graphics.Gpu.Shader
         public bool Equals(ShaderAddresses other)
         {
             return VertexA        == other.VertexA &&
-                   Vertex         == other.Vertex &&
+                   VertexB        == other.VertexB &&
                    TessControl    == other.TessControl &&
                    TessEvaluation == other.TessEvaluation &&
                    Geometry       == other.Geometry &&
@@ -45,7 +49,16 @@ namespace Ryujinx.Graphics.Gpu.Shader
         /// <returns>Hash code</returns>
         public override int GetHashCode()
         {
-            return HashCode.Combine(VertexA, Vertex, TessControl, TessEvaluation, Geometry, Fragment);
+            return HashCode.Combine(VertexA, VertexB, TessControl, TessEvaluation, Geometry, Fragment);
+        }
+
+        /// <summary>
+        /// Gets a view of the structure as a span of addresses.
+        /// </summary>
+        /// <returns>Span of addresses</returns>
+        public Span<ulong> AsSpan()
+        {
+            return MemoryMarshal.CreateSpan(ref VertexA, Unsafe.SizeOf<ShaderAddresses>() / sizeof(ulong));
         }
     }
 }

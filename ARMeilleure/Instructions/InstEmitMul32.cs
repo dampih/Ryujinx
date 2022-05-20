@@ -6,7 +6,7 @@ using System;
 
 using static ARMeilleure.Instructions.InstEmitAluHelper;
 using static ARMeilleure.Instructions.InstEmitHelper;
-using static ARMeilleure.IntermediateRepresentation.OperandHelper;
+using static ARMeilleure.IntermediateRepresentation.Operand.Factory;
 
 namespace ARMeilleure.Instructions
 {
@@ -33,7 +33,7 @@ namespace ARMeilleure.Instructions
 
             Operand res = context.Add(a, context.Multiply(n, m));
 
-            if (op.SetFlags)
+            if (ShouldSetFlags(context))
             {
                 EmitNZFlagsCheck(context, res);
             }
@@ -250,13 +250,13 @@ namespace ARMeilleure.Instructions
             Operand hi = context.ConvertI64ToI32(context.ShiftRightUI(res, Const(32)));
             Operand lo = context.ConvertI64ToI32(res);
 
-            if (op.SetFlags)
+            if (ShouldSetFlags(context))
             {
                 EmitNZFlagsCheck(context, res);
             }
 
-            EmitGenericAluStoreA32(context, op.RdHi, op.SetFlags, hi);
-            EmitGenericAluStoreA32(context, op.RdLo, op.SetFlags, lo);
+            EmitGenericAluStoreA32(context, op.RdHi, ShouldSetFlags(context), hi);
+            EmitGenericAluStoreA32(context, op.RdLo, ShouldSetFlags(context), lo);
         }
 
         public static void Smulw_(ArmEmitterContext context)
@@ -283,6 +283,26 @@ namespace ARMeilleure.Instructions
             EmitGenericAluStoreA32(context, op.Rd, false, res);
         }
 
+        public static void Umaal(ArmEmitterContext context)
+        {
+            OpCode32AluUmull op = (OpCode32AluUmull)context.CurrOp;
+
+            Operand n   = context.ZeroExtend32(OperandType.I64, GetIntA32(context, op.Rn));
+            Operand m   = context.ZeroExtend32(OperandType.I64, GetIntA32(context, op.Rm));
+            Operand dHi = context.ZeroExtend32(OperandType.I64, GetIntA32(context, op.RdHi));
+            Operand dLo = context.ZeroExtend32(OperandType.I64, GetIntA32(context, op.RdLo));
+
+            Operand res = context.Multiply(n, m);
+                    res = context.Add(res, dHi);
+                    res = context.Add(res, dLo);
+
+            Operand hi = context.ConvertI64ToI32(context.ShiftRightUI(res, Const(32)));
+            Operand lo = context.ConvertI64ToI32(res);
+
+            EmitGenericAluStoreA32(context, op.RdHi, false, hi);
+            EmitGenericAluStoreA32(context, op.RdLo, false, lo);
+        }
+
         public static void Umlal(ArmEmitterContext context)
         {
             EmitMlal(context, false);
@@ -300,16 +320,16 @@ namespace ARMeilleure.Instructions
             Operand hi = context.ConvertI64ToI32(context.ShiftRightUI(res, Const(32)));
             Operand lo = context.ConvertI64ToI32(res);
 
-            if (op.SetFlags)
+            if (ShouldSetFlags(context))
             {
                 EmitNZFlagsCheck(context, res);
             }
 
-            EmitGenericAluStoreA32(context, op.RdHi, op.SetFlags, hi);
-            EmitGenericAluStoreA32(context, op.RdLo, op.SetFlags, lo);
+            EmitGenericAluStoreA32(context, op.RdHi, ShouldSetFlags(context), hi);
+            EmitGenericAluStoreA32(context, op.RdLo, ShouldSetFlags(context), lo);
         }
 
-        public static void EmitMlal(ArmEmitterContext context, bool signed)
+        private static void EmitMlal(ArmEmitterContext context, bool signed)
         {
             OpCode32AluUmull op = (OpCode32AluUmull)context.CurrOp;
 
@@ -336,13 +356,13 @@ namespace ARMeilleure.Instructions
             Operand hi = context.ConvertI64ToI32(context.ShiftRightUI(res, Const(32)));
             Operand lo = context.ConvertI64ToI32(res);
 
-            if (op.SetFlags)
+            if (ShouldSetFlags(context))
             {
                 EmitNZFlagsCheck(context, res);
             }
 
-            EmitGenericAluStoreA32(context, op.RdHi, op.SetFlags, hi);
-            EmitGenericAluStoreA32(context, op.RdLo, op.SetFlags, lo);
+            EmitGenericAluStoreA32(context, op.RdHi, ShouldSetFlags(context), hi);
+            EmitGenericAluStoreA32(context, op.RdLo, ShouldSetFlags(context), lo);
         }
 
         private static void UpdateQFlag(ArmEmitterContext context, Operand q)

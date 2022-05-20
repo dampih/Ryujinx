@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using System.Threading;
 using Ryujinx.HLE.HOS.Kernel.Memory;
@@ -11,25 +12,25 @@ namespace Ryujinx.HLE.HOS.Services.Time
 {
     class TimeSharedMemory
     {
-        private Switch        _device;
-        private KSharedMemory _sharedMemory;
-        private long          _timeSharedMemoryAddress;
-        private int           _timeSharedMemorySize;
+        private Switch              _device;
+        private KSharedMemory       _sharedMemory;
+        private SharedMemoryStorage _timeSharedMemoryStorage;
+        private int                 _timeSharedMemorySize;
 
         private const uint SteadyClockContextOffset         = 0x00;
         private const uint LocalSystemClockContextOffset    = 0x38;
         private const uint NetworkSystemClockContextOffset  = 0x80;
         private const uint AutomaticCorrectionEnabledOffset = 0xC8;
 
-        public void Initialize(Switch device, KSharedMemory sharedMemory, long timeSharedMemoryAddress, int timeSharedMemorySize)
+        public void Initialize(Switch device, KSharedMemory sharedMemory, SharedMemoryStorage timeSharedMemoryStorage, int timeSharedMemorySize)
         {
             _device                  = device;
             _sharedMemory            = sharedMemory;
-            _timeSharedMemoryAddress = timeSharedMemoryAddress;
+            _timeSharedMemoryStorage = timeSharedMemoryStorage;
             _timeSharedMemorySize    = timeSharedMemorySize;
 
             // Clean the shared memory
-            _device.Memory.FillWithZeros(_timeSharedMemoryAddress, _timeSharedMemorySize);
+            timeSharedMemoryStorage.ZeroFill();
         }
 
         public KSharedMemory GetSharedMemory()
@@ -86,41 +87,39 @@ namespace Ryujinx.HLE.HOS.Services.Time
             WriteObjectToSharedMemory(NetworkSystemClockContextOffset, 4, context);
         }
 
-        private T ReadObjectFromSharedMemory<T>(long offset, long padding)
+        private T ReadObjectFromSharedMemory<T>(ulong offset, ulong padding) where T : unmanaged
         {
-            long indexOffset  = _timeSharedMemoryAddress + offset;
-
             T    result;
             uint index;
             uint possiblyNewIndex;
 
             do
             {
-                index = _device.Memory.ReadUInt32(indexOffset);
+                index = _timeSharedMemoryStorage.GetRef<uint>(offset);
 
-                long objectOffset = indexOffset + 4 + padding + (index & 1) * Marshal.SizeOf<T>();
+                ulong objectOffset = offset + 4 + padding + (ulong)((index & 1) * Unsafe.SizeOf<T>());
 
-                result = _device.Memory.ReadStruct<T>(objectOffset);
+                result = _timeSharedMemoryStorage.GetRef<T>(objectOffset);
 
                 Thread.MemoryBarrier();
 
-                possiblyNewIndex = _device.Memory.ReadUInt32(indexOffset);
+                possiblyNewIndex = _device.Memory.Read<uint>(offset);
             } while (index != possiblyNewIndex);
 
             return result;
         }
 
-        private void WriteObjectToSharedMemory<T>(long offset, long padding, T value)
+        private void WriteObjectToSharedMemory<T>(ulong offset, ulong padding, T value) where T : unmanaged
         {
-            long indexOffset  = _timeSharedMemoryAddress + offset;
-            uint newIndex     = _device.Memory.ReadUInt32(indexOffset) + 1;
-            long objectOffset = indexOffset + 4 + padding + (newIndex & 1) * Marshal.SizeOf<T>();
+            uint newIndex = _timeSharedMemoryStorage.GetRef<uint>(offset) + 1;
 
-            _device.Memory.WriteStruct(objectOffset, value);
+            ulong objectOffset = offset + 4 + padding + (ulong)((newIndex & 1) * Unsafe.SizeOf<T>());
+
+            _timeSharedMemoryStorage.GetRef<T>(objectOffset) = value;
 
             Thread.MemoryBarrier();
 
-            _device.Memory.WriteUInt32(indexOffset, newIndex);
+            _timeSharedMemoryStorage.GetRef<uint>(offset) = newIndex;
         }
     }
 }

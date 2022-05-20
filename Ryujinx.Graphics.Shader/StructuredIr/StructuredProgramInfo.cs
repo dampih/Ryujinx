@@ -2,43 +2,35 @@ using System.Collections.Generic;
 
 namespace Ryujinx.Graphics.Shader.StructuredIr
 {
+    struct TransformFeedbackOutput
+    {
+        public readonly bool Valid;
+        public readonly int Buffer;
+        public readonly int Offset;
+        public readonly int Stride;
+
+        public TransformFeedbackOutput(int buffer, int offset, int stride)
+        {
+            Valid = true;
+            Buffer = buffer;
+            Offset = offset;
+            Stride = stride;
+        }
+    }
+
     class StructuredProgramInfo
     {
-        public AstBlock MainBlock { get; }
-
-        public HashSet<AstOperand> Locals { get; }
-
-        public HashSet<int> CBuffers { get; }
-        public HashSet<int> SBuffers { get; }
-
-        public HashSet<int> IAttributes { get; }
-        public HashSet<int> OAttributes { get; }
-
-        public InterpolationQualifier[] InterpolationQualifiers { get; }
-
-        public bool UsesInstanceId { get; set; }
+        public List<StructuredFunction> Functions { get; }
 
         public HelperFunctionsMask HelperFunctionsMask { get; set; }
 
-        public HashSet<AstTextureOperation> Samplers { get; }
-        public HashSet<AstTextureOperation> Images   { get; }
+        public TransformFeedbackOutput[] TransformFeedbackOutputs { get; }
 
-        public StructuredProgramInfo(AstBlock mainBlock)
+        public StructuredProgramInfo()
         {
-            MainBlock = mainBlock;
+            Functions = new List<StructuredFunction>();
 
-            Locals = new HashSet<AstOperand>();
-
-            CBuffers = new HashSet<int>();
-            SBuffers = new HashSet<int>();
-
-            IAttributes = new HashSet<int>();
-            OAttributes = new HashSet<int>();
-
-            InterpolationQualifiers = new InterpolationQualifier[32];
-
-            Samplers = new HashSet<AstTextureOperation>();
-            Images   = new HashSet<AstTextureOperation>();
+            TransformFeedbackOutputs = new TransformFeedbackOutput[0xc0];
         }
     }
 }
