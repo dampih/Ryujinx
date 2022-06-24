@@ -1,5 +1,6 @@
 ﻿using ARMeilleure.Translation;
 using ARMeilleure.Translation.PTC;
+using Avalonia;
 using Avalonia.Input;
 using Avalonia.Threading;
 using LibHac.Tools.FsSystem;
@@ -13,6 +14,7 @@ using Ryujinx.Ava.Common.Locale;
 using Ryujinx.Ava.Input;
 using Ryujinx.Ava.Ui.Controls;
 using Ryujinx.Ava.Ui.Models;
+using Ryujinx.Ava.Ui.Vulkan;
 using Ryujinx.Ava.Ui.Windows;
 using Ryujinx.Common;
 using Ryujinx.Common.Configuration;
@@ -22,6 +24,7 @@ using Ryujinx.Graphics.GAL;
 using Ryujinx.Graphics.GAL.Multithreading;
 using Ryujinx.Graphics.Gpu;
 using Ryujinx.Graphics.OpenGL;
+using Ryujinx.Graphics.Vulkan;
 using Ryujinx.HLE.FileSystem;
 using Ryujinx.HLE.HOS;
 using Ryujinx.HLE.HOS.Services.Account.Acc;
@@ -57,7 +60,7 @@ namespace Ryujinx.Ava
         private static readonly Cursor InvisibleCursor = new Cursor(StandardCursorType.None);
 
         private readonly AccountManager _accountManager;
-        private UserChannelPersistence _userChannelPersistence;
+        private readonly UserChannelPersistence _userChannelPersistence;
 
         private readonly InputManager _inputManager;
 
@@ -82,7 +85,6 @@ namespace Ryujinx.Ava
         private bool _dialogShown;
 
         private WindowsMultimediaTimerResolution _windowsMultimediaTimerResolution;
-        private KeyboardStateSnapshot _lastKeyboardSnapshot;
 
         private readonly CancellationTokenSource _gpuCancellationTokenSource;
 
@@ -126,7 +128,6 @@ namespace Ryujinx.Ava
             _glLogLevel = ConfigurationState.Instance.Logger.GraphicsDebugLevel;
             _inputManager.SetMouseDriver(new AvaloniaMouseDriver(renderer));
             _keyboardInterface = (IKeyboard)_inputManager.KeyboardDriver.GetGamepad("0");
-            _lastKeyboardSnapshot = _keyboardInterface.GetKeyboardStateSnapshot();
 
             NpadManager = _inputManager.CreateNpadManager();
             TouchScreenManager = _inputManager.CreateTouchScreenManager();
@@ -590,7 +591,23 @@ namespace Ryujinx.Ava
         {
             VirtualFileSystem.ReloadKeySet();
 
-            IRenderer renderer = new Renderer();
+            IRenderer renderer;
+
+            if (Program.UseVulkan)
+            {
+                var vulkan = AvaloniaLocator.Current.GetService<VulkanPlatformInterface>();
+                renderer = new VulkanGraphicsDevice(vulkan.Instance.InternalHandle,
+                    vulkan.Device.InternalHandle,
+                    vulkan.PhysicalDevice.InternalHandle,
+                    vulkan.Device.Queue.InternalHandle,
+                    vulkan.PhysicalDevice.QueueFamilyIndex,
+                    vulkan.Device.Lock);
+            }
+            else
+            {
+                renderer = new Renderer();
+            }
+
             IHardwareDeviceDriver deviceDriver = new DummyHardwareDeviceDriver();
 
             BackendThreading threadingMode = ConfigurationState.Instance.Graphics.BackendThreading;
@@ -722,9 +739,7 @@ namespace Ryujinx.Ava
                 }
             }
 
-            var memoryConfiguration = ConfigurationState.Instance.System.ExpandRam.Value
-                ? HLE.MemoryConfiguration.MemoryConfiguration6GB
-                : HLE.MemoryConfiguration.MemoryConfiguration4GB;
+            var memoryConfiguration = ConfigurationState.Instance.System.ExpandRam.Value ? HLE.MemoryConfiguration.MemoryConfiguration6GB : HLE.MemoryConfiguration.MemoryConfiguration4GB;
 
             IntegrityCheckLevel fsIntegrityCheckLevel = ConfigurationState.Instance.System.EnableFsIntegrityChecks ? IntegrityCheckLevel.ErrorOnInvalid : IntegrityCheckLevel.None;
 
@@ -800,9 +815,12 @@ namespace Ryujinx.Ava
 
             _renderer.ScreenCaptured += Renderer_ScreenCaptured;
 
-            (_renderer as Renderer).InitializeBackgroundContext(SPBOpenGLContext.CreateBackgroundContext(Renderer.GameContext));
+            if (!Program.UseVulkan)
+            {
+                (_renderer as Renderer).InitializeBackgroundContext(SPBOpenGLContext.CreateBackgroundContext((Renderer as OpenGLRendererControl).GameContext));
 
-            Renderer.MakeCurrent();
+                Renderer.MakeCurrent();
+            }
 
             Device.Gpu.Renderer.Initialize(_glLogLevel);
 
@@ -861,8 +879,6 @@ namespace Ryujinx.Ava
                 dockedMode += $" ({scale}x)";
             }
 
-            string vendor = _renderer is Renderer renderer ? renderer.GpuVendor : "";
-
             StatusUpdatedEvent?.Invoke(this, new StatusUpdatedEventArgs(
                 Device.EnableDeviceVsync,
                 Device.GetVolume(),
@@ -870,7 +886,7 @@ namespace Ryujinx.Ava
                 ConfigurationState.Instance.Graphics.AspectRatio.Value.ToText(),
                 LocaleManager.Instance["Game"] + $": {Device.Statistics.GetGameFrameRate():00.00} FPS ({Device.Statistics.GetGameFrameTime():00.00} ms)",
                 $"FIFO: {Device.Statistics.GetFifoPercent():00.00} %",
-                $"GPU: {vendor}"));
+                $"GPU: {_renderer.GetHardwareInfo().GpuVendor}"));
 
             Renderer.Present(image);
         }
@@ -898,7 +914,7 @@ namespace Ryujinx.Ava
             }
         }
 
-        private void HandleScreenState(KeyboardStateSnapshot keyboard, KeyboardStateSnapshot lastKeyboard)
+        private void HandleScreenState()
         {
             if (ConfigurationState.Instance.Hid.EnableMouse)
             {
@@ -935,19 +951,12 @@ namespace Ryujinx.Ava
             {
                 Dispatcher.UIThread.Post(() =>
                 {
-                    KeyboardStateSnapshot keyboard = _keyboardInterface.GetKeyboardStateSnapshot();
+                    HandleScreenState();
 
-                    HandleScreenState(keyboard, _lastKeyboardSnapshot);
-
-                    if (keyboard.IsPressed(Key.Delete))
+                    if (_keyboardInterface.GetKeyboardStateSnapshot().IsPressed(Key.Delete) && _parent.WindowState != WindowState.FullScreen)
                     {
-                        if (_parent.WindowState != WindowState.FullScreen)
-                        {
-                            Ptc.Continue();
-                        }
+                        Ptc.Continue();
                     }
-
-                    _lastKeyboardSnapshot = keyboard;
                 });
             }
 
