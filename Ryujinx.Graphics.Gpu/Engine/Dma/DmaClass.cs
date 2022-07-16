@@ -343,7 +343,7 @@ namespace Ryujinx.Graphics.Gpu.Engine.Dma
                     _state.State.SetRemapComponentsComponentSize == SetRemapComponentsComponentSize.Four)
                 {
                     // Fast path for clears when remap is enabled.
-                    memoryManager.Physical.BufferCache.ClearBuffer(memoryManager, dstGpuVa, size * 4, _state.State.SetRemapConstA);
+                    memoryManager.VirtualBufferCache.ClearBuffer(dstGpuVa, size * 4, _state.State.SetRemapConstA);
                 }
                 else
                 {
@@ -363,7 +363,7 @@ namespace Ryujinx.Graphics.Gpu.Engine.Dma
                     }
                     else
                     {
-                        memoryManager.Physical.BufferCache.CopyBuffer(memoryManager, srcGpuVa, dstGpuVa, size);
+                        memoryManager.VirtualBufferCache.CopyBuffer(srcGpuVa, dstGpuVa, size);
                     }
                 }
             }
