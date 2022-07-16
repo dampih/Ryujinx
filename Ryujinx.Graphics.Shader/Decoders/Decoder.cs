@@ -340,7 +340,7 @@ namespace Ryujinx.Graphics.Shader.Decoders
         {
             InstConditional condOp = new InstConditional(op.RawOpCode);
 
-            if (op.Name == InstName.Exit && condOp.Ccc != Ccc.T)
+            if ((op.Name == InstName.Bra || op.Name == InstName.Exit) && condOp.Ccc != Ccc.T)
             {
                 return false;
             }
