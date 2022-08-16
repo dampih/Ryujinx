@@ -162,7 +162,7 @@ namespace Ryujinx.Graphics.Vulkan
                 size);
         }
 
-        public unsafe void ClearRenderTargetColor(int index, int layer, ColorF color)
+        public unsafe void ClearRenderTargetColor(int index, int layer, int layerCount, ColorF color)
         {
             if (FramebufferParams == null || !FramebufferParams.IsValidColorAttachment(index))
             {
@@ -178,12 +178,12 @@ namespace Ryujinx.Graphics.Vulkan
 
             var clearValue = new ClearValue(new ClearColorValue(color.Red, color.Green, color.Blue, color.Alpha));
             var attachment = new ClearAttachment(ImageAspectFlags.ImageAspectColorBit, (uint)index, clearValue);
-            var clearRect = FramebufferParams?.GetClearRect(ClearScissor, layer) ?? default;
+            var clearRect = FramebufferParams.GetClearRect(ClearScissor, layer, layerCount);
 
             Gd.Api.CmdClearAttachments(CommandBuffer, 1, &attachment, 1, &clearRect);
         }
 
-        public unsafe void ClearRenderTargetDepthStencil(int layer, float depthValue, bool depthMask, int stencilValue, int stencilMask)
+        public unsafe void ClearRenderTargetDepthStencil(int layer, int layerCount, float depthValue, bool depthMask, int stencilValue, int stencilMask)
         {
             // TODO: Use stencilMask (fully)
 
@@ -208,7 +208,7 @@ namespace Ryujinx.Graphics.Vulkan
             }
 
             var attachment = new ClearAttachment(flags, 0, clearValue);
-            var clearRect = FramebufferParams?.GetClearRect(ClearScissor, layer) ?? default;
+            var clearRect = FramebufferParams.GetClearRect(ClearScissor, layer, layerCount);
 
             Gd.Api.CmdClearAttachments(CommandBuffer, 1, &attachment, 1, &clearRect);
         }
@@ -582,7 +582,7 @@ namespace Ryujinx.Graphics.Vulkan
             _newState.PipelineLayout = internalProgram.PipelineLayout;
             _newState.StagesCount = (uint)stages.Length;
 
-            stages.CopyTo(_newState.Stages.ToSpan().Slice(0, stages.Length));
+            stages.CopyTo(_newState.Stages.AsSpan().Slice(0, stages.Length));
 
             SignalStateChange();
         }
@@ -921,7 +921,7 @@ namespace Ryujinx.Graphics.Vulkan
 
         protected void UpdatePipelineAttachmentFormats()
         {
-            var dstAttachmentFormats = _newState.Internal.AttachmentFormats.ToSpan();
+            var dstAttachmentFormats = _newState.Internal.AttachmentFormats.AsSpan();
             FramebufferParams.AttachmentFormats.CopyTo(dstAttachmentFormats);
 
             int maxAttachmentIndex = FramebufferParams.MaxColorAttachmentIndex + (FramebufferParams.HasDepthStencil ? 1 : 0);
