@@ -335,7 +335,9 @@ namespace Ryujinx.Memory.Tracking
             ulong rgSize = 0;
 
             long[] seqMasks = _sequenceNumberBitmap.Masks;
-            long[] checkedMasks = _sequenceNumberBitmap.Masks;
+
+            long[] checkedMasks = _dirtyCheckedBitmap.Masks;
+
             long[] masks = _dirtyBitmap.Masks;
 
             int startIndex = startHandle >> ConcurrentBitmap.IntShift;
