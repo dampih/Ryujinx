@@ -1,4 +1,3 @@
-using Avalonia;
 using Avalonia.Collections;
 using Avalonia.Controls;
 using Avalonia.Threading;
@@ -10,7 +9,6 @@ using Ryujinx.Audio.Backends.SoundIo;
 using Ryujinx.Ava.Common.Locale;
 using Ryujinx.Ava.Input;
 using Ryujinx.Ava.Ui.Controls;
-using Ryujinx.Ava.Ui.Vulkan;
 using Ryujinx.Ava.Ui.Windows;
 using Ryujinx.Common.Configuration;
 using Ryujinx.Common.Configuration.Hid;
@@ -22,14 +20,10 @@ using Ryujinx.HLE.HOS.Services.Time.TimeZone;
 using Ryujinx.Input;
 using Ryujinx.Ui.Common.Configuration;
 using Ryujinx.Ui.Common.Configuration.System;
-using Silk.NET.Vulkan;
 using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
-using System.Diagnostics;
 using System.Linq;
-using System.Runtime.InteropServices;
-using System.Threading.Tasks;
 using TimeZone = Ryujinx.Ava.Ui.Models.TimeZone;
 
 namespace Ryujinx.Ava.Ui.ViewModels
@@ -48,6 +42,13 @@ namespace Ryujinx.Ava.Ui.ViewModels
         private int _graphicsBackendMultithreadingIndex;
         private float _previousVolumeLevel;
         private float _volume;
+        private bool _isVulkanAvailable = true;
+        private bool _directoryChanged = false;
+        private List<string> _gpuIds = new List<string>();
+        private KeyboardHotkeys _keyboardHotkeys;
+        private int _graphicsBackendIndex;
+        private int _upscaleType;
+        private float _upscaleLevel;
 
         public int ResolutionScale
         {
@@ -97,6 +98,28 @@ namespace Ryujinx.Ava.Ui.ViewModels
             }
         }
 
+        public bool IsVulkanAvailable
+        {
+            get => _isVulkanAvailable;
+            set
+            {
+                _isVulkanAvailable = value;
+
+                OnPropertyChanged();
+            }
+        }
+
+        public bool DirectoryChanged
+        {
+            get => _directoryChanged;
+            set
+            {
+                _directoryChanged = value;
+
+                OnPropertyChanged();
+            }
+        }
+
         public bool EnableDiscordIntegration { get; set; }
         public bool CheckUpdatesOnStart { get; set; }
         public bool ShowConfirmExit { get; set; }
@@ -126,6 +149,7 @@ namespace Ryujinx.Ava.Ui.ViewModels
         public bool IsSDL2Enabled { get; set; }
         public bool EnableCustomTheme { get; set; }
         public bool IsCustomResolutionScaleActive => _resolutionScale == 0;
+        public bool IsUpscalingActive => _upscaleType == (int)Ryujinx.Common.Configuration.UpscaleType.Fsr;
         public bool IsVulkanSelected => GraphicsBackendIndex == 0;
 
         public string TimeZone { get; set; }
@@ -138,17 +162,39 @@ namespace Ryujinx.Ava.Ui.ViewModels
         public int AudioBackend { get; set; }
         public int MaxAnisotropy { get; set; }
         public int AspectRatio { get; set; }
+        public int AntiAliasingEffect { get; set; }
+        public string UpscaleLevelText => UpscaleLevel.ToString("0.00");
+        public float UpscaleLevel
+        {
+            get => _upscaleLevel;
+            set
+            {
+                _upscaleLevel = value;
+                OnPropertyChanged();
+                OnPropertyChanged(nameof(UpscaleLevelText));
+            }
+        }
         public int OpenglDebugLevel { get; set; }
         public int MemoryMode { get; set; }
         public int BaseStyleIndex { get; set; }
         public int GraphicsBackendIndex
         {
-            get => graphicsBackendIndex;
+            get => _graphicsBackendIndex;
             set
             {
-                graphicsBackendIndex = value;
+                _graphicsBackendIndex = value;
                 OnPropertyChanged();
                 OnPropertyChanged(nameof(IsVulkanSelected));
+            }
+        }
+        public int UpscaleType
+        {
+            get => _upscaleType;
+            set
+            {
+                _upscaleType = value;
+                OnPropertyChanged();
+                OnPropertyChanged(nameof(IsUpscalingActive));
             }
         }
 
@@ -170,13 +216,8 @@ namespace Ryujinx.Ava.Ui.ViewModels
         public DateTimeOffset DateOffset { get; set; }
         public TimeSpan TimeOffset { get; set; }
         public AvaloniaList<TimeZone> TimeZones { get; set; }
-
         public AvaloniaList<string> GameDirectories { get; set; }
         public ObservableCollection<ComboBoxItem> AvailableGpus { get; set; }
-
-        private KeyboardHotkeys _keyboardHotkeys;
-        private int graphicsBackendIndex;
-        private List<string> _gpuIds = new List<string>();
 
         public KeyboardHotkeys KeyboardHotkeys
         {
@@ -230,23 +271,19 @@ namespace Ryujinx.Ava.Ui.ViewModels
         {
             _gpuIds = new List<string>();
             List<string> names = new List<string>();
-            if (!Program.UseVulkan)
+            var devices = VulkanRenderer.GetPhysicalDevices();
+
+            if (devices.Length == 0)
             {
-                var devices = VulkanRenderer.GetPhysicalDevices();
-                foreach (var device in devices)
-                {
-                    _gpuIds.Add(device.Id);
-                    names.Add($"{device.Name} {(device.IsDiscrete ? "(dGpu)" : "")}");
-                }
+                IsVulkanAvailable = false;
+                GraphicsBackendIndex = 1;
             }
             else
             {
-                foreach (var device in VulkanPhysicalDevice.SuitableDevices)
+                foreach (var device in devices)
                 {
-                    _gpuIds.Add(VulkanInitialization.StringFromIdPair(device.Value.VendorID, device.Value.DeviceID));
-                    var value = device.Value;
-                    var name = value.DeviceName;
-                    names.Add($"{Marshal.PtrToStringAnsi((IntPtr)name)} {(device.Value.DeviceType == PhysicalDeviceType.DiscreteGpu ? "(dGpu)" : "")}");
+                    _gpuIds.Add(device.Id);
+                    names.Add($"{device.Name} {(device.IsDiscrete ? "(dGPU)" : "")}");
                 }
             }
 
@@ -278,8 +315,6 @@ namespace Ryujinx.Ava.Ui.ViewModels
             if (_validTzRegions.Contains(location))
             {
                 TimeZone = location;
-
-                OnPropertyChanged(nameof(TimeZone));
             }
         }
 
@@ -358,6 +393,9 @@ namespace Ryujinx.Ava.Ui.ViewModels
 
             MaxAnisotropy = anisotropy == -1 ? 0 : (int)(MathF.Log2(anisotropy));
             AspectRatio = (int)config.Graphics.AspectRatio.Value;
+            AntiAliasingEffect = (int)config.Graphics.AntiAliasing.Value;
+            UpscaleType = (int)config.Graphics.UpscaleType.Value;
+            UpscaleLevel = config.Graphics.UpscaleLevel.Value;
 
             int resolution = config.Graphics.ResScale;
 
@@ -374,18 +412,20 @@ namespace Ryujinx.Ava.Ui.ViewModels
             _previousVolumeLevel = Volume;
         }
 
-        public async Task SaveSettings()
+        public void SaveSettings()
         {
-            List<string> gameDirs = new List<string>(GameDirectories);
-
             ConfigurationState config = ConfigurationState.Instance;
+
+            if (_directoryChanged)
+            {
+                List<string> gameDirs = new List<string>(GameDirectories);
+                config.Ui.GameDirs.Value = gameDirs;
+            }
 
             if (_validTzRegions.Contains(TimeZone))
             {
                 config.System.TimeZone.Value = TimeZone;
             }
-
-            bool requiresRestart = config.Graphics.GraphicsBackend.Value != (GraphicsBackend)GraphicsBackendIndex;
 
             config.Logger.EnableError.Value = EnableError;
             config.Logger.EnableTrace.Value = EnableTrace;
@@ -419,19 +459,7 @@ namespace Ryujinx.Ava.Ui.ViewModels
             config.System.Language.Value = (Language)Language;
             config.System.Region.Value = (Region)Region;
 
-            var selectedGpu = _gpuIds.ElementAtOrDefault(PreferredGpuIndex);
-            if (!requiresRestart)
-            {
-                var platform = AvaloniaLocator.Current.GetService<VulkanPlatformInterface>();
-                if (platform != null)
-                {
-                    var physicalDevice = platform.PhysicalDevice;
-
-                    requiresRestart = physicalDevice.DeviceId != selectedGpu;
-                }
-            }
-
-            config.Graphics.PreferredGpu.Value = selectedGpu;
+            config.Graphics.PreferredGpu.Value = _gpuIds.ElementAtOrDefault(PreferredGpuIndex);
 
             if (ConfigurationState.Instance.Graphics.BackendThreading != (BackendThreading)GraphicsBackendMultithreadingIndex)
             {
@@ -444,7 +472,6 @@ namespace Ryujinx.Ava.Ui.ViewModels
 
             config.System.SystemTimeOffset.Value = systemTimeOffset.Seconds;
             config.Graphics.ShadersDumpPath.Value = ShaderDumpPath;
-            config.Ui.GameDirs.Value = gameDirs;
             config.System.FsGlobalAccessLogMode.Value = FsGlobalAccessLogMode;
             config.System.MemoryManagerMode.Value = (MemoryManagerMode)MemoryMode;
 
@@ -452,6 +479,9 @@ namespace Ryujinx.Ava.Ui.ViewModels
 
             config.Graphics.MaxAnisotropy.Value = anisotropy;
             config.Graphics.AspectRatio.Value = (AspectRatio)AspectRatio;
+            config.Graphics.AntiAliasing.Value = (AntiAliasing)AntiAliasingEffect;
+            config.Graphics.UpscaleType.Value = (UpscaleType)UpscaleType;
+            config.Graphics.UpscaleLevel.Value = UpscaleLevel;
             config.Graphics.ResScale.Value = ResolutionScale == 0 ? -1 : ResolutionScale;
             config.Graphics.ResScaleCustom.Value = CustomResolutionScale;
             config.System.AudioVolume.Value = Volume / 100;
@@ -471,20 +501,6 @@ namespace Ryujinx.Ava.Ui.ViewModels
             MainWindow.UpdateGraphicsConfig();
 
             _previousVolumeLevel = Volume;
-
-            if (requiresRestart)
-            {
-                var choice = await ContentDialogHelper.CreateChoiceDialog(
-                    LocaleManager.Instance["SettingsAppRequiredRestartMessage"],
-                    LocaleManager.Instance["SettingsGpuBackendRestartMessage"],
-                    LocaleManager.Instance["SettingsGpuBackendRestartSubMessage"]);
-
-                if (choice)
-                {
-                    Process.Start(Environment.ProcessPath);
-                    Environment.Exit(0);
-                }
-            }
         }
 
         public void RevertIfNotSaved()

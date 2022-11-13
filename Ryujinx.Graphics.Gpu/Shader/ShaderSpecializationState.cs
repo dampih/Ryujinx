@@ -515,7 +515,12 @@ namespace Ryujinx.Graphics.Gpu.Shader
                 return false;
             }
 
-            if (!graphicsState.AttributeTypes.ToSpan().SequenceEqual(GraphicsState.AttributeTypes.ToSpan()))
+            if (!graphicsState.AttributeTypes.AsSpan().SequenceEqual(GraphicsState.AttributeTypes.AsSpan()))
+            {
+                return false;
+            }
+
+            if (graphicsState.HasConstantBufferDrawParameters != GraphicsState.HasConstantBufferDrawParameters)
             {
                 return false;
             }
@@ -552,11 +557,11 @@ namespace Ryujinx.Graphics.Gpu.Shader
         private static void UpdateCachedBuffer(
             GpuChannel channel,
             bool isCompute,
-            ref int cachedTextureBufferIndex,
-            ref int cachedSamplerBufferIndex,
-            ref ReadOnlySpan<int> cachedTextureBuffer,
-            ref ReadOnlySpan<int> cachedSamplerBuffer,
-            ref int cachedStageIndex,
+            scoped ref int cachedTextureBufferIndex,
+            scoped ref int cachedSamplerBufferIndex,
+            scoped ref ReadOnlySpan<int> cachedTextureBuffer,
+            scoped ref ReadOnlySpan<int> cachedSamplerBuffer,
+            scoped ref int cachedStageIndex,
             int textureBufferIndex,
             int samplerBufferIndex,
             int stageIndex)

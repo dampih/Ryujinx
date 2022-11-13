@@ -54,6 +54,9 @@ namespace Ryujinx.Graphics.Shader.Translation
         public const int UserAttributeBase   = 0x80;
         public const int UserAttributeEnd    = UserAttributeBase + UserAttributesCount * 16;
 
+        public const int UserAttributePerPatchBase = 0x18;
+        public const int UserAttributePerPatchEnd  = 0x200;
+
         public const int LoadOutputMask = 1 << 30;
         public const int Mask = 0x3fffffff;
 
@@ -92,5 +95,11 @@ namespace Ryujinx.Graphics.Shader.Translation
         public const int LtMask = 0x2000040;
 
         public const int ThreadKill = 0x2000044;
+
+        public const int BaseInstance = 0x2000050;
+        public const int BaseVertex = 0x2000054;
+        public const int InstanceIndex = 0x2000058;
+        public const int VertexIndex = 0x200005c;
+        public const int DrawIndex = 0x2000060;
     }
 }

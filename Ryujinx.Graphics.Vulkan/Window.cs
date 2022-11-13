@@ -1,4 +1,5 @@
 ﻿using Ryujinx.Graphics.GAL;
+using Ryujinx.Graphics.Vulkan.Effects;
 using Silk.NET.Vulkan;
 using System;
 using System.Linq;
@@ -25,7 +26,17 @@ namespace Ryujinx.Graphics.Vulkan
 
         private int _width;
         private int _height;
+        private bool _vsyncEnabled;
+        private bool _vsyncModeChanged;
         private VkFormat _format;
+        private AntiAliasing _currentAntiAliasing;
+        private bool _updateEffect;
+        private IPostProcessingEffect _effect;
+        private IScaler _upscaler;
+        private bool _isLinear;
+        private float _upscalerLevel;
+        private bool _updateUpscaler;
+        private UpscaleType _currentUpscaler;
 
         public unsafe Window(VulkanRenderer gd, SurfaceKHR surface, PhysicalDevice physicalDevice, Device device)
         {
@@ -47,6 +58,8 @@ namespace Ryujinx.Graphics.Vulkan
 
         private void RecreateSwapchain()
         {
+            _vsyncModeChanged = false;
+
             for (int i = 0; i < _swapchainImageViews.Length; i++)
             {
                 _swapchainImageViews[i].Dispose();
@@ -105,12 +118,12 @@ namespace Ryujinx.Graphics.Vulkan
                 ImageFormat = surfaceFormat.Format,
                 ImageColorSpace = surfaceFormat.ColorSpace,
                 ImageExtent = extent,
-                ImageUsage = ImageUsageFlags.ImageUsageColorAttachmentBit | ImageUsageFlags.ImageUsageTransferDstBit,
+                ImageUsage = ImageUsageFlags.ImageUsageColorAttachmentBit | ImageUsageFlags.ImageUsageTransferDstBit | ImageUsageFlags.ImageUsageStorageBit,
                 ImageSharingMode = SharingMode.Exclusive,
                 ImageArrayLayers = 1,
                 PreTransform = capabilities.CurrentTransform,
                 CompositeAlpha = CompositeAlphaFlagsKHR.CompositeAlphaOpaqueBitKhr,
-                PresentMode = ChooseSwapPresentMode(presentModes),
+                PresentMode = ChooseSwapPresentMode(presentModes, _vsyncEnabled),
                 Clipped = true,
                 OldSwapchain = oldSwapchain
             };
@@ -178,15 +191,19 @@ namespace Ryujinx.Graphics.Vulkan
             return availableFormats[0];
         }
 
-        private static PresentModeKHR ChooseSwapPresentMode(PresentModeKHR[] availablePresentModes)
+        private static PresentModeKHR ChooseSwapPresentMode(PresentModeKHR[] availablePresentModes, bool vsyncEnabled)
         {
-            if (availablePresentModes.Contains(PresentModeKHR.PresentModeImmediateKhr))
+            if (!vsyncEnabled && availablePresentModes.Contains(PresentModeKHR.PresentModeImmediateKhr))
             {
                 return PresentModeKHR.PresentModeImmediateKhr;
             }
             else if (availablePresentModes.Contains(PresentModeKHR.PresentModeMailboxKhr))
             {
                 return PresentModeKHR.PresentModeMailboxKhr;
+            }
+            else if (availablePresentModes.Contains(PresentModeKHR.PresentModeFifoKhr))
+            {
+               return PresentModeKHR.PresentModeFifoKhr;
             }
             else
             {
@@ -209,7 +226,7 @@ namespace Ryujinx.Graphics.Vulkan
             }
         }
 
-        public unsafe override void Present(ITexture texture, ImageCrop crop, Action<object> swapBuffersCallback)
+        public unsafe override void Present(ITexture texture, ImageCrop crop, Action swapBuffersCallback)
         {
             uint nextImage = 0;
 
@@ -224,7 +241,8 @@ namespace Ryujinx.Graphics.Vulkan
                     ref nextImage);
 
                 if (acquireResult == Result.ErrorOutOfDateKhr ||
-                    acquireResult == Result.SuboptimalKhr)
+                    acquireResult == Result.SuboptimalKhr ||
+                    _vsyncModeChanged)
                 {
                     RecreateSwapchain();
                 }
@@ -250,6 +268,13 @@ namespace Ryujinx.Graphics.Vulkan
                 ImageLayout.General);
 
             var view = (TextureView)texture;
+
+            UpdateEffect();
+
+            if (_effect != null)
+            {
+                view = _effect.Run(view, cbs, _width, _height);
+            }
 
             int srcX0, srcX1, srcY0, srcY1;
             float scale = view.ScaleFactor;
@@ -286,6 +311,18 @@ namespace Ryujinx.Graphics.Vulkan
 
             if (ScreenCaptureRequested)
             {
+                if (_effect != null)
+                {
+                    _gd.CommandBufferPool.Return(
+                        cbs,
+                        null,
+                        stackalloc[] { PipelineStageFlags.PipelineStageColorAttachmentOutputBit },
+                        null);
+                    _gd.FlushAllCommands();
+                    cbs.GetFence().Wait();
+                    cbs = _gd.CommandBufferPool.Rent();
+                }
+
                 CaptureFrame(view, srcX0, srcY0, srcX1 - srcX0, srcY1 - srcY0, view.Info.Format.IsBgr(), crop.FlipX, crop.FlipY);
 
                 ScreenCaptureRequested = false;
@@ -306,7 +343,28 @@ namespace Ryujinx.Graphics.Vulkan
             int dstY0 = crop.FlipY ? dstPaddingY : _height - dstPaddingY;
             int dstY1 = crop.FlipY ? _height - dstPaddingY : dstPaddingY;
 
-            _gd.HelperShader.Blit(
+            if (_upscaler != null)
+            {
+                _upscaler.Run(view,
+                    cbs,
+                    _swapchainImageViews[nextImage],
+                    _format,
+                    _width,
+                    _height,
+                    srcX0,
+                    srcX1,
+                    srcY0,
+                    srcY1,
+                    dstX0,
+                    dstX1,
+                    dstY0,
+                    dstY1,
+                   crop.FlipX,
+                   crop.FlipY);
+            }
+            else
+            {
+                _gd.HelperShader.Blit(
                 _gd,
                 cbs,
                 view,
@@ -316,8 +374,9 @@ namespace Ryujinx.Graphics.Vulkan
                 _format,
                 new Extents2D(srcX0, srcY0, srcX1, srcY1),
                 new Extents2D(dstX0, dstY1, dstX1, dstY0),
-                true,
+                _isLinear,
                 true);
+            }
 
             Transition(
                 cbs.CommandBuffer,
@@ -354,6 +413,95 @@ namespace Ryujinx.Graphics.Vulkan
             {
                 _gd.SwapchainApi.QueuePresent(_gd.Queue, presentInfo);
             }
+        }
+
+        public override void SetAntiAliasing(AntiAliasing effect)
+        {
+            if (_currentAntiAliasing == effect && _effect != null)
+            {
+                return;
+            }
+
+            _currentAntiAliasing = effect;
+
+            _updateEffect = true;
+        }
+
+        public override void SetUpscaler(UpscaleType type)
+        {
+            if (_currentUpscaler == type && _effect != null)
+            {
+                return;
+            }
+
+            _currentUpscaler = type;
+
+            _updateUpscaler = true;
+        }
+
+        private void UpdateEffect()
+        {
+            if (_updateEffect)
+            {
+                _updateEffect = false;
+
+                switch (_currentAntiAliasing)
+                {
+                    case AntiAliasing.Fxaa:
+                        _effect?.Dispose();
+                        _effect = new FxaaPostProcessingEffect(_gd, _device);
+                        break;
+                    case AntiAliasing.None:
+                        _effect?.Dispose();
+                        _effect = null;
+                        break;
+                    case AntiAliasing.SmaaLow:
+                    case AntiAliasing.SmaaMedium:
+                    case AntiAliasing.SmaaHigh:
+                    case AntiAliasing.SmaaUltra:
+                        var quality = _currentAntiAliasing - AntiAliasing.SmaaLow;
+                        if (_effect is SmaaPostProcessingEffect smaa)
+                        {
+                            smaa.Quality = quality;
+                        }
+                        else
+                        {
+                            _effect?.Dispose();
+                            _effect = new SmaaPostProcessingEffect(_gd, _device, quality);
+                        }
+                        break;
+                }
+            }
+
+            if (_updateUpscaler)
+            {
+                _updateUpscaler = false;
+
+                switch (_currentUpscaler)
+                {
+                    case UpscaleType.Bilinear:
+                    case UpscaleType.Nearest:
+                        _upscaler?.Dispose();
+                        _upscaler = null;
+                        _isLinear = _currentUpscaler == UpscaleType.Bilinear;
+                        break;
+                    case UpscaleType.Fsr:
+                        if (_upscaler is not FsrUpscaler)
+                        {
+                            _upscaler?.Dispose();
+                            _upscaler = new FsrUpscaler(_gd, _device);
+                        }
+
+                        _upscaler.Level = _upscalerLevel;
+                        break;
+                }
+            }
+        }
+
+        public override void SetUpscalerLevel(float level)
+        {
+            _upscalerLevel = level;
+            _updateUpscaler = true;
         }
 
         private unsafe void Transition(
@@ -404,6 +552,12 @@ namespace Ryujinx.Graphics.Vulkan
             // Not needed as we can get the size from the surface.
         }
 
+        public override void ChangeVSyncMode(bool vsyncEnabled)
+        {
+            _vsyncEnabled = vsyncEnabled;
+            _vsyncModeChanged = true;
+        }
+
         protected virtual void Dispose(bool disposing)
         {
             if (disposing)
@@ -419,8 +573,10 @@ namespace Ryujinx.Graphics.Vulkan
                     }
 
                     _gd.SwapchainApi.DestroySwapchain(_device, _swapchain, null);
-
                 }
+
+                _effect?.Dispose();
+                _upscaler?.Dispose();
             }
         }
 

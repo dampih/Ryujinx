@@ -12,6 +12,13 @@ namespace Ryujinx.Graphics.Gpu.Engine.MME
     /// </summary>
     class MacroHLE : IMacroEE
     {
+        private const int ColorLayerCountOffset = 0x818;
+        private const int ColorStructSize = 0x40;
+        private const int ZetaLayerCountOffset = 0x1230;
+
+        private const int IndirectDataEntrySize = 0x10;
+        private const int IndirectIndexedDataEntrySize = 0x14;
+
         private readonly GPFifoProcessor _processor;
         private readonly MacroHLEFunctionName _functionName;
 
@@ -45,6 +52,15 @@ namespace Ryujinx.Graphics.Gpu.Engine.MME
         {
             switch (_functionName)
             {
+                case MacroHLEFunctionName.ClearColor:
+                    ClearColor(state, arg0);
+                    break;
+                case MacroHLEFunctionName.ClearDepthStencil:
+                    ClearDepthStencil(state, arg0);
+                    break;
+                case MacroHLEFunctionName.DrawElementsIndirect:
+                    DrawElementsIndirect(state, arg0);
+                    break;
                 case MacroHLEFunctionName.MultiDrawElementsIndirectCount:
                     MultiDrawElementsIndirectCount(state, arg0);
                     break;
@@ -54,7 +70,70 @@ namespace Ryujinx.Graphics.Gpu.Engine.MME
         }
 
         /// <summary>
-        /// Performs a indirect multi-draw, with parameters from a GPU buffer.
+        /// Clears one bound color target.
+        /// </summary>
+        /// <param name="state">GPU state at the time of the call</param>
+        /// <param name="arg0">First argument of the call</param>
+        private void ClearColor(IDeviceState state, int arg0)
+        {
+            int index = (arg0 >> 6) & 0xf;
+            int layerCount = state.Read(ColorLayerCountOffset + index * ColorStructSize);
+
+            _processor.ThreedClass.Clear(arg0, layerCount);
+        }
+
+        /// <summary>
+        /// Clears the current depth-stencil target.
+        /// </summary>
+        /// <param name="state">GPU state at the time of the call</param>
+        /// <param name="arg0">First argument of the call</param>
+        private void ClearDepthStencil(IDeviceState state, int arg0)
+        {
+            int layerCount = state.Read(ZetaLayerCountOffset);
+
+            _processor.ThreedClass.Clear(arg0, layerCount);
+        }
+
+        /// <summary>
+        /// Performs a indirect indexed draw, with parameters from a GPU buffer.
+        /// </summary>
+        /// <param name="state">GPU state at the time of the call</param>
+        /// <param name="arg0">First argument of the call</param>
+        private void DrawElementsIndirect(IDeviceState state, int arg0)
+        {
+            var topology = (PrimitiveTopology)arg0;
+
+            var count = FetchParam();
+            var instanceCount = FetchParam();
+            var firstIndex = FetchParam();
+            var baseVertex = FetchParam();
+            var baseInstance = FetchParam();
+
+            ulong indirectBufferGpuVa = count.GpuVa;
+            int indexCount = firstIndex.Word + count.Word;
+
+            // It should be empty at this point, but clear it just to be safe.
+            Fifo.Clear();
+
+            var bufferCache = _processor.MemoryManager.Physical.BufferCache;
+
+            ulong indirectBufferAddress = bufferCache.TranslateAndCreateBuffer(
+                _processor.MemoryManager,
+                indirectBufferGpuVa,
+                IndirectIndexedDataEntrySize);
+
+            _processor.ThreedClass.DrawIndirect(
+                topology,
+                indirectBufferAddress,
+                0,
+                1,
+                IndirectIndexedDataEntrySize,
+                indexCount,
+                Threed.IndirectDrawType.DrawIndexedIndirect);
+        }
+
+        /// <summary>
+        /// Performs a indirect indexed multi-draw, with parameters from a GPU buffer.
         /// </summary>
         /// <param name="state">GPU state at the time of the call</param>
         /// <param name="arg0">First argument of the call</param>
@@ -97,8 +176,6 @@ namespace Ryujinx.Graphics.Gpu.Engine.MME
                 return;
             }
 
-            int indirectBufferSize = maxDrawCount * stride;
-
             ulong indirectBufferGpuVa = 0;
             int indexCount = 0;
 
@@ -131,10 +208,19 @@ namespace Ryujinx.Graphics.Gpu.Engine.MME
 
             var bufferCache = _processor.MemoryManager.Physical.BufferCache;
 
-            var parameterBuffer = bufferCache.GetGpuBufferRange(_processor.MemoryManager, parameterBufferGpuVa, 4);
-            var indirectBuffer = bufferCache.GetGpuBufferRange(_processor.MemoryManager, indirectBufferGpuVa, (ulong)indirectBufferSize);
+            ulong indirectBufferSize = (ulong)maxDrawCount * (ulong)stride;
 
-            _processor.ThreedClass.MultiDrawIndirectCount(indexCount, topology, indirectBuffer, parameterBuffer, maxDrawCount, stride);
+            ulong indirectBufferAddress = bufferCache.TranslateAndCreateBuffer(_processor.MemoryManager, indirectBufferGpuVa, indirectBufferSize);
+            ulong parameterBufferAddress = bufferCache.TranslateAndCreateBuffer(_processor.MemoryManager, parameterBufferGpuVa, 4);
+
+            _processor.ThreedClass.DrawIndirect(
+                topology,
+                indirectBufferAddress,
+                parameterBufferAddress,
+                maxDrawCount,
+                stride,
+                indexCount,
+                Threed.IndirectDrawType.DrawIndexedIndirectCount);
         }
 
         /// <summary>
@@ -151,17 +237,6 @@ namespace Ryujinx.Graphics.Gpu.Engine.MME
             }
 
             return value;
-        }
-
-        /// <summary>
-        /// Performs a GPU method call.
-        /// </summary>
-        /// <param name="state">Current GPU state</param>
-        /// <param name="methAddr">Address, in words, of the method</param>
-        /// <param name="value">Call argument</param>
-        private static void Send(IDeviceState state, int methAddr, int value)
-        {
-            state.Write(methAddr * 4, value);
         }
     }
 }
