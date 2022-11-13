@@ -274,7 +274,8 @@ namespace Ryujinx.Cpu.Jit
         /// <inheritdoc/>
         public void Write(ulong va, ReadOnlySpan<byte> data)
         {
-            try {
+            try
+            {
                 SignalMemoryTracking(va, (ulong)data.Length, write: true);
 
                 _addressSpaceMirror.Write(va, data);
@@ -303,6 +304,34 @@ namespace Ryujinx.Cpu.Jit
                 {
                     throw;
                 }
+            }
+        }
+
+        /// <inheritdoc/>
+        public bool WriteWithRedundancyCheck(ulong va, ReadOnlySpan<byte> data)
+        {
+            try
+            {
+                SignalMemoryTracking(va, (ulong)data.Length, false);
+
+                Span<byte> target = _addressSpaceMirror.GetSpan(va, data.Length);
+                bool changed = !data.SequenceEqual(target);
+
+                if (changed)
+                {
+                    data.CopyTo(target);
+                }
+
+                return changed;
+            }
+            catch (InvalidMemoryRegionException)
+            {
+                if (_invalidAccessHandler == null || !_invalidAccessHandler(va))
+                {
+                    throw;
+                }
+
+                return true;
             }
         }
 

@@ -24,6 +24,7 @@ namespace Ryujinx.Graphics.OpenGL
         private TextureCopy _textureCopy;
         private TextureCopy _backgroundTextureCopy;
         internal TextureCopy TextureCopy => BackgroundContextWorker.InBackground ? _backgroundTextureCopy : _textureCopy;
+        internal TextureCopyMS TextureCopyMS { get; }
 
         private Sync _sync;
 
@@ -48,12 +49,13 @@ namespace Ryujinx.Graphics.OpenGL
             _window = new Window(this);
             _textureCopy = new TextureCopy(this);
             _backgroundTextureCopy = new TextureCopy(this);
+            TextureCopyMS = new TextureCopyMS(this);
             _sync = new Sync();
             PersistentBuffers = new PersistentBuffers();
             ResourcePool = new ResourcePool();
         }
 
-        public BufferHandle CreateBuffer(int size)
+        public BufferHandle CreateBuffer(int size, BufferHandle storageHint)
         {
             BufferCount++;
 
@@ -92,7 +94,7 @@ namespace Ryujinx.Graphics.OpenGL
             return new HardwareInfo(GpuVendor, GpuRenderer);
         }
 
-        public ReadOnlySpan<byte> GetBufferData(BufferHandle buffer, int offset, int size)
+        public PinnedSpan<byte> GetBufferData(BufferHandle buffer, int offset, int size)
         {
             return Buffer.GetData(this, buffer, offset, size);
         }
@@ -120,6 +122,7 @@ namespace Ryujinx.Graphics.OpenGL
                 supportsNonConstantTextureOffset: HwCapabilities.SupportsNonConstantTextureOffset,
                 supportsShaderBallot: HwCapabilities.SupportsShaderBallot,
                 supportsTextureShadowLod: HwCapabilities.SupportsTextureShadowLod,
+                supportsViewportIndex: true,
                 supportsViewportSwizzle: HwCapabilities.SupportsViewportSwizzle,
                 supportsIndirectParameters: HwCapabilities.SupportsIndirectParameters,
                 maximumUniformBuffersPerStage: 13, // TODO: Avoid hardcoding those limits here and get from driver?
@@ -210,6 +213,7 @@ namespace Ryujinx.Graphics.OpenGL
         {
             _textureCopy.Dispose();
             _backgroundTextureCopy.Dispose();
+            TextureCopyMS.Dispose();
             PersistentBuffers.Dispose();
             ResourcePool.Dispose();
             _pipeline.Dispose();

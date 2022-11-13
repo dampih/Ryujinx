@@ -2,6 +2,7 @@ using Ryujinx.Common.Logging;
 using Ryujinx.HLE.HOS.Ipc;
 using Ryujinx.HLE.HOS.Kernel.Common;
 using Ryujinx.HLE.HOS.Kernel.Threading;
+using Ryujinx.HLE.HOS.Services.Am.AppletAE.AllSystemAppletProxiesService.SystemAppletProxy.Types;
 using System;
 
 namespace Ryujinx.HLE.HOS.Services.Am.AppletAE.AllSystemAppletProxiesService.SystemAppletProxy
@@ -31,6 +32,7 @@ namespace Ryujinx.HLE.HOS.Services.Am.AppletAE.AllSystemAppletProxiesService.Sys
         private bool _handlesRequestToDisplay            = false;
         private bool _autoSleepDisabled                  = false;
         private bool _albumImageTakenNotificationEnabled = false;
+        private bool _recordVolumeMuted = false;
 
         private uint _screenShotImageOrientation = 0;
         private uint _idleTimeDetectionExtension = 0;
@@ -316,6 +318,22 @@ namespace Ryujinx.HLE.HOS.Services.Am.AppletAE.AllSystemAppletProxiesService.Sys
             return ResultCode.Success;
         }
 
+        [CommandHipc(80)] // 4.0.0+
+        // SetWirelessPriorityMode(s32 wireless_priority_mode)
+        public ResultCode SetWirelessPriorityMode(ServiceCtx context)
+        {
+            WirelessPriorityMode wirelessPriorityMode = (WirelessPriorityMode)context.RequestData.ReadInt32();
+
+            if (wirelessPriorityMode > WirelessPriorityMode.Unknown2)
+            {
+                return ResultCode.InvalidParameters;
+            }
+
+            Logger.Stub?.PrintStub(LogClass.ServiceAm, new { wirelessPriorityMode });
+
+            return ResultCode.Success;
+        }
+
         [CommandHipc(90)] // 6.0.0+
         // GetAccumulatedSuspendedTickValue() -> u64
         public ResultCode GetAccumulatedSuspendedTickValue(ServiceCtx context)
@@ -353,6 +371,35 @@ namespace Ryujinx.HLE.HOS.Services.Am.AppletAE.AllSystemAppletProxiesService.Sys
             bool albumImageTakenNotificationEnabled = context.RequestData.ReadBoolean();
 
             _albumImageTakenNotificationEnabled = albumImageTakenNotificationEnabled;
+
+            return ResultCode.Success;
+        }
+
+        [CommandHipc(120)] // 11.0.0+
+        // SaveCurrentScreenshot(s32 album_report_option)
+        public ResultCode SaveCurrentScreenshot(ServiceCtx context)
+        {
+            AlbumReportOption albumReportOption = (AlbumReportOption)context.RequestData.ReadInt32();
+
+            if (albumReportOption > AlbumReportOption.Unknown3)
+            {
+                return ResultCode.InvalidParameters;
+            }
+
+            Logger.Stub?.PrintStub(LogClass.ServiceAm, new { albumReportOption });
+
+            return ResultCode.Success;
+        }
+
+        [CommandHipc(130)] // 13.0.0+
+        // SetRecordVolumeMuted(b8)
+        public ResultCode SetRecordVolumeMuted(ServiceCtx context)
+        {
+            bool recordVolumeMuted = context.RequestData.ReadBoolean();
+
+            Logger.Stub?.PrintStub(LogClass.ServiceAm, new { recordVolumeMuted });
+
+            _recordVolumeMuted = recordVolumeMuted;
 
             return ResultCode.Success;
         }

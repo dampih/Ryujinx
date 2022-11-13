@@ -28,33 +28,31 @@ namespace Ryujinx.Graphics.Shader.CodeGen.Glsl
 
         private static Dictionary<int, BuiltInAttribute> _builtInAttributes = new Dictionary<int, BuiltInAttribute>()
         {
-            { AttributeConsts.TessLevelOuter0, new BuiltInAttribute("gl_TessLevelOuter[0]", VariableType.F32)  },
-            { AttributeConsts.TessLevelOuter1, new BuiltInAttribute("gl_TessLevelOuter[1]", VariableType.F32)  },
-            { AttributeConsts.TessLevelOuter2, new BuiltInAttribute("gl_TessLevelOuter[2]", VariableType.F32)  },
-            { AttributeConsts.TessLevelOuter3, new BuiltInAttribute("gl_TessLevelOuter[3]", VariableType.F32)  },
-            { AttributeConsts.TessLevelInner0, new BuiltInAttribute("gl_TessLevelInner[0]", VariableType.F32)  },
-            { AttributeConsts.TessLevelInner1, new BuiltInAttribute("gl_TessLevelInner[1]", VariableType.F32)  },
-            { AttributeConsts.Layer,           new BuiltInAttribute("gl_Layer",             VariableType.S32)  },
-            { AttributeConsts.PointSize,       new BuiltInAttribute("gl_PointSize",         VariableType.F32)  },
-            { AttributeConsts.PositionX,       new BuiltInAttribute("gl_Position.x",        VariableType.F32)  },
-            { AttributeConsts.PositionY,       new BuiltInAttribute("gl_Position.y",        VariableType.F32)  },
-            { AttributeConsts.PositionZ,       new BuiltInAttribute("gl_Position.z",        VariableType.F32)  },
-            { AttributeConsts.PositionW,       new BuiltInAttribute("gl_Position.w",        VariableType.F32)  },
-            { AttributeConsts.ClipDistance0,   new BuiltInAttribute("gl_ClipDistance[0]",   VariableType.F32)  },
-            { AttributeConsts.ClipDistance1,   new BuiltInAttribute("gl_ClipDistance[1]",   VariableType.F32)  },
-            { AttributeConsts.ClipDistance2,   new BuiltInAttribute("gl_ClipDistance[2]",   VariableType.F32)  },
-            { AttributeConsts.ClipDistance3,   new BuiltInAttribute("gl_ClipDistance[3]",   VariableType.F32)  },
-            { AttributeConsts.ClipDistance4,   new BuiltInAttribute("gl_ClipDistance[4]",   VariableType.F32)  },
-            { AttributeConsts.ClipDistance5,   new BuiltInAttribute("gl_ClipDistance[5]",   VariableType.F32)  },
-            { AttributeConsts.ClipDistance6,   new BuiltInAttribute("gl_ClipDistance[6]",   VariableType.F32)  },
-            { AttributeConsts.ClipDistance7,   new BuiltInAttribute("gl_ClipDistance[7]",   VariableType.F32)  },
-            { AttributeConsts.PointCoordX,     new BuiltInAttribute("gl_PointCoord.x",      VariableType.F32)  },
-            { AttributeConsts.PointCoordY,     new BuiltInAttribute("gl_PointCoord.y",      VariableType.F32)  },
-            { AttributeConsts.TessCoordX,      new BuiltInAttribute("gl_TessCoord.x",       VariableType.F32)  },
-            { AttributeConsts.TessCoordY,      new BuiltInAttribute("gl_TessCoord.y",       VariableType.F32)  },
-            { AttributeConsts.InstanceId,      new BuiltInAttribute("gl_InstanceID",        VariableType.S32)  },
-            { AttributeConsts.VertexId,        new BuiltInAttribute("gl_VertexID",          VariableType.S32)  },
-            { AttributeConsts.FrontFacing,     new BuiltInAttribute("gl_FrontFacing",       VariableType.Bool) },
+            { AttributeConsts.Layer,         new BuiltInAttribute("gl_Layer",           VariableType.S32)  },
+            { AttributeConsts.PointSize,     new BuiltInAttribute("gl_PointSize",       VariableType.F32)  },
+            { AttributeConsts.PositionX,     new BuiltInAttribute("gl_Position.x",      VariableType.F32)  },
+            { AttributeConsts.PositionY,     new BuiltInAttribute("gl_Position.y",      VariableType.F32)  },
+            { AttributeConsts.PositionZ,     new BuiltInAttribute("gl_Position.z",      VariableType.F32)  },
+            { AttributeConsts.PositionW,     new BuiltInAttribute("gl_Position.w",      VariableType.F32)  },
+            { AttributeConsts.ClipDistance0, new BuiltInAttribute("gl_ClipDistance[0]", VariableType.F32)  },
+            { AttributeConsts.ClipDistance1, new BuiltInAttribute("gl_ClipDistance[1]", VariableType.F32)  },
+            { AttributeConsts.ClipDistance2, new BuiltInAttribute("gl_ClipDistance[2]", VariableType.F32)  },
+            { AttributeConsts.ClipDistance3, new BuiltInAttribute("gl_ClipDistance[3]", VariableType.F32)  },
+            { AttributeConsts.ClipDistance4, new BuiltInAttribute("gl_ClipDistance[4]", VariableType.F32)  },
+            { AttributeConsts.ClipDistance5, new BuiltInAttribute("gl_ClipDistance[5]", VariableType.F32)  },
+            { AttributeConsts.ClipDistance6, new BuiltInAttribute("gl_ClipDistance[6]", VariableType.F32)  },
+            { AttributeConsts.ClipDistance7, new BuiltInAttribute("gl_ClipDistance[7]", VariableType.F32)  },
+            { AttributeConsts.PointCoordX,   new BuiltInAttribute("gl_PointCoord.x",    VariableType.F32)  },
+            { AttributeConsts.PointCoordY,   new BuiltInAttribute("gl_PointCoord.y",    VariableType.F32)  },
+            { AttributeConsts.TessCoordX,    new BuiltInAttribute("gl_TessCoord.x",     VariableType.F32)  },
+            { AttributeConsts.TessCoordY,    new BuiltInAttribute("gl_TessCoord.y",     VariableType.F32)  },
+            { AttributeConsts.InstanceId,    new BuiltInAttribute("gl_InstanceID",      VariableType.S32)  },
+            { AttributeConsts.VertexId,      new BuiltInAttribute("gl_VertexID",        VariableType.S32)  },
+            { AttributeConsts.BaseInstance,  new BuiltInAttribute("gl_BaseInstance",    VariableType.S32)  },
+            { AttributeConsts.BaseVertex,    new BuiltInAttribute("gl_BaseVertex",      VariableType.S32)  },
+            { AttributeConsts.InstanceIndex, new BuiltInAttribute("gl_InstanceIndex",   VariableType.S32)  },
+            { AttributeConsts.VertexIndex,   new BuiltInAttribute("gl_VertexIndex",     VariableType.S32)  },
+            { AttributeConsts.FrontFacing,   new BuiltInAttribute("gl_FrontFacing",     VariableType.Bool) },
 
             // Special.
             { AttributeConsts.FragmentOutputDepth, new BuiltInAttribute("gl_FragDepth",           VariableType.F32)  },
@@ -105,15 +103,15 @@ namespace Ryujinx.Graphics.Shader.CodeGen.Glsl
             return name;
         }
 
-        public string GetExpression(AstOperand operand, ShaderConfig config)
+        public string GetExpression(CodeGenContext context, AstOperand operand)
         {
             return operand.Type switch
             {
                 OperandType.Argument => GetArgumentName(operand.Value),
-                OperandType.Attribute => GetAttributeName(operand.Value, config, perPatch: false),
-                OperandType.AttributePerPatch => GetAttributeName(operand.Value, config, perPatch: true),
+                OperandType.Attribute => GetAttributeName(context, operand.Value, perPatch: false),
+                OperandType.AttributePerPatch => GetAttributeName(context, operand.Value, perPatch: true),
                 OperandType.Constant => NumberFormatter.FormatInt(operand.Value),
-                OperandType.ConstantBuffer => GetConstantBufferName(operand, config),
+                OperandType.ConstantBuffer => GetConstantBufferName(operand, context.Config),
                 OperandType.LocalVariable => _locals[operand],
                 OperandType.Undefined => DefaultNames.UndefinedName,
                 _ => throw new ArgumentException($"Invalid operand type \"{operand.Type}\".")
@@ -155,13 +153,15 @@ namespace Ryujinx.Graphics.Shader.CodeGen.Glsl
             return GetVec4Indexed(GetUbName(stage, slotExpr) + $"[{offsetExpr} >> 2]", offsetExpr + " & 3", indexElement);
         }
 
-        public static string GetOutAttributeName(int value, ShaderConfig config, bool perPatch)
+        public static string GetOutAttributeName(CodeGenContext context, int value, bool perPatch)
         {
-            return GetAttributeName(value, config, perPatch, isOutAttr: true);
+            return GetAttributeName(context, value, perPatch, isOutAttr: true);
         }
 
-        public static string GetAttributeName(int value, ShaderConfig config, bool perPatch, bool isOutAttr = false, string indexExpr = "0")
+        public static string GetAttributeName(CodeGenContext context, int value, bool perPatch, bool isOutAttr = false, string indexExpr = "0")
         {
+            ShaderConfig config = context.Config;
+
             if ((value & AttributeConsts.LoadOutputMask) != 0)
             {
                 isOutAttr = true;
@@ -170,8 +170,31 @@ namespace Ryujinx.Graphics.Shader.CodeGen.Glsl
             value &= AttributeConsts.Mask & ~3;
             char swzMask = GetSwizzleMask((value >> 2) & 3);
 
-            if (value >= AttributeConsts.UserAttributeBase && value < AttributeConsts.UserAttributeEnd)
+            if (perPatch)
             {
+                if (value >= AttributeConsts.UserAttributePerPatchBase && value < AttributeConsts.UserAttributePerPatchEnd)
+                {
+                    value -= AttributeConsts.UserAttributePerPatchBase;
+
+                    return $"{DefaultNames.PerPatchAttributePrefix}{(value >> 4)}.{swzMask}";
+                }
+                else if (value < AttributeConsts.UserAttributePerPatchBase)
+                {
+                    return value switch
+                    {
+                        AttributeConsts.TessLevelOuter0 => "gl_TessLevelOuter[0]",
+                        AttributeConsts.TessLevelOuter1 => "gl_TessLevelOuter[1]",
+                        AttributeConsts.TessLevelOuter2 => "gl_TessLevelOuter[2]",
+                        AttributeConsts.TessLevelOuter3 => "gl_TessLevelOuter[3]",
+                        AttributeConsts.TessLevelInner0 => "gl_TessLevelInner[0]",
+                        AttributeConsts.TessLevelInner1 => "gl_TessLevelInner[1]",
+                        _ => null
+                    };
+                }
+            }
+            else if (value >= AttributeConsts.UserAttributeBase && value < AttributeConsts.UserAttributeEnd)
+            {
+                int attrOffset = value;
                 value -= AttributeConsts.UserAttributeBase;
 
                 string prefix = isOutAttr
@@ -179,11 +202,6 @@ namespace Ryujinx.Graphics.Shader.CodeGen.Glsl
                     : DefaultNames.IAttributePrefix;
 
                 bool indexable = config.UsedFeatures.HasFlag(isOutAttr ? FeatureFlags.OaIndexing : FeatureFlags.IaIndexing);
-
-                if (!indexable && perPatch)
-                {
-                    prefix = DefaultNames.PerPatchAttributePrefix;
-                }
 
                 if (indexable)
                 {
@@ -200,20 +218,21 @@ namespace Ryujinx.Graphics.Shader.CodeGen.Glsl
                     ((config.LastInVertexPipeline && isOutAttr) ||
                     (config.Stage == ShaderStage.Fragment && !isOutAttr)))
                 {
-                    string name = $"{prefix}{(value >> 4)}_{swzMask}";
+                    int components = config.LastInPipeline ? context.Info.GetTransformFeedbackOutputComponents(attrOffset) : 1;
+                    string name = components > 1 ? $"{prefix}{(value >> 4)}" : $"{prefix}{(value >> 4)}_{swzMask}";
 
-                    if (!perPatch && AttributeInfo.IsArrayAttributeGlsl(config.Stage, isOutAttr))
+                    if (AttributeInfo.IsArrayAttributeGlsl(config.Stage, isOutAttr))
                     {
                         name += isOutAttr ? "[gl_InvocationID]" : $"[{indexExpr}]";
                     }
 
-                    return name;
+                    return components > 1 ? name + '.' + swzMask : name;
                 }
                 else
                 {
                     string name = $"{prefix}{(value >> 4)}";
 
-                    if (!perPatch && AttributeInfo.IsArrayAttributeGlsl(config.Stage, isOutAttr))
+                    if (AttributeInfo.IsArrayAttributeGlsl(config.Stage, isOutAttr))
                     {
                         name += isOutAttr ? "[gl_InvocationID]" : $"[{indexExpr}]";
                     }
@@ -277,7 +296,7 @@ namespace Ryujinx.Graphics.Shader.CodeGen.Glsl
 
                     string name = builtInAttr.Name;
 
-                    if (!perPatch && AttributeInfo.IsArrayAttributeGlsl(config.Stage, isOutAttr) && AttributeInfo.IsArrayBuiltIn(value))
+                    if (AttributeInfo.IsArrayAttributeGlsl(config.Stage, isOutAttr) && AttributeInfo.IsArrayBuiltIn(value))
                     {
                         name = isOutAttr ? $"gl_out[gl_InvocationID].{name}" : $"gl_in[{indexExpr}].{name}";
                     }
@@ -454,12 +473,7 @@ namespace Ryujinx.Graphics.Shader.CodeGen.Glsl
 
                     AttributeType type = context.Config.GpuAccessor.QueryAttributeType(location);
 
-                    return type switch
-                    {
-                        AttributeType.Sint => VariableType.S32,
-                        AttributeType.Uint => VariableType.U32,
-                        _ => VariableType.F32
-                    };
+                    return type.ToVariableType();
                 }
             }
 

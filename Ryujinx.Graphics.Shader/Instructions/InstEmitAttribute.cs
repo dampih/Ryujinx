@@ -46,12 +46,12 @@ namespace Ryujinx.Graphics.Shader.Instructions
 
                     context.FlagAttributeRead(offset);
 
-                    if (op.O)
+                    if (op.O && CanLoadOutput(offset))
                     {
                         offset |= AttributeConsts.LoadOutputMask;
                     }
 
-                    Operand src = op.P ? AttributePerPatch(offset) : Attribute(offset);
+                    Operand src = op.P ? AttributePerPatch(offset) : CreateInputAttribute(context, offset);
 
                     context.Copy(Register(rd), src);
                 }
@@ -61,7 +61,7 @@ namespace Ryujinx.Graphics.Shader.Instructions
 
                     context.FlagAttributeRead(offset);
 
-                    if (op.O)
+                    if (op.O && CanLoadOutput(offset))
                     {
                         offset |= AttributeConsts.LoadOutputMask;
                     }
@@ -241,6 +241,11 @@ namespace Ryujinx.Graphics.Shader.Instructions
             }
         }
 
+        private static bool CanLoadOutput(int attr)
+        {
+            return attr != AttributeConsts.TessCoordX && attr != AttributeConsts.TessCoordY;
+        }
+
         private static bool TryFixedFuncToUserAttributeIpa(EmitterContext context, int attr, out Operand selectedAttr)
         {
             if (attr >= AttributeConsts.FrontColorDiffuseR && attr < AttributeConsts.BackColorDiffuseR)
@@ -306,6 +311,23 @@ namespace Ryujinx.Graphics.Shader.Instructions
             }
 
             return attr;
+        }
+
+        private static Operand CreateInputAttribute(EmitterContext context, int attr)
+        {
+            if (context.Config.Options.TargetApi == TargetApi.Vulkan)
+            {
+                if (attr == AttributeConsts.InstanceId)
+                {
+                    return context.ISubtract(Attribute(AttributeConsts.InstanceIndex), Attribute(AttributeConsts.BaseInstance));
+                }
+                else if (attr == AttributeConsts.VertexId)
+                {
+                    return Attribute(AttributeConsts.VertexIndex);
+                }
+            }
+
+            return Attribute(attr);
         }
     }
 }
