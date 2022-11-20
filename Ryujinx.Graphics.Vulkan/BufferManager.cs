@@ -57,6 +57,26 @@ namespace Ryujinx.Graphics.Vulkan
             StagingBuffer = new StagingBuffer(gd, this);
         }
 
+        public BufferHandle CreateWithHandle(VulkanRenderer gd, int size, bool deviceLocal)
+        {
+            return CreateWithHandle(gd, size, deviceLocal, out _);
+        }
+
+        public BufferHandle CreateWithHandle(VulkanRenderer gd, int size, bool deviceLocal, out BufferHolder holder)
+        {
+            holder = Create(gd, size, deviceLocal: deviceLocal);
+            if (holder == null)
+            {
+                return BufferHandle.Null;
+            }
+
+            BufferCount++;
+
+            ulong handle64 = (uint)_buffers.Add(holder);
+
+            return Unsafe.As<ulong, BufferHandle>(ref handle64);
+        }
+
         public BufferHandle CreateWithHandle(VulkanRenderer gd, int size, BufferAllocationType baseType = BufferAllocationType.HostMapped, BufferHandle storageHint = default)
         {
             var holder = Create(gd, size, baseType: baseType, storageHint: storageHint);
