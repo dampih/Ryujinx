@@ -1,3 +1,4 @@
+using Ryujinx.Common.Memory;
 using System;
 
 namespace Ryujinx.Graphics.GAL
@@ -14,11 +15,12 @@ namespace Ryujinx.Graphics.GAL
 
         ITexture CreateView(TextureCreateInfo info, int firstLayer, int firstLevel);
 
-        ReadOnlySpan<byte> GetData();
-        ReadOnlySpan<byte> GetData(int layer, int level);
+        PinnedSpan<byte> GetData();
+        PinnedSpan<byte> GetData(int layer, int level);
 
-        void SetData(ReadOnlySpan<byte> data);
-        void SetData(ReadOnlySpan<byte> data, int layer, int level);
+        void SetData(SpanOrArray<byte> data);
+        void SetData(SpanOrArray<byte> data, int layer, int level);
+        void SetData(SpanOrArray<byte> data, int layer, int level, Rectangle<int> region);
         void SetStorage(BufferRange buffer);
         void Release();
     }

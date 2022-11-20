@@ -11,10 +11,11 @@ namespace Ryujinx.Graphics.GAL
 
         void ClearBuffer(BufferHandle destination, int offset, int size, uint value);
 
-        void ClearRenderTargetColor(int index, int layer, uint componentMask, ColorF color);
+        void ClearRenderTargetColor(int index, int layer, int layerCount, uint componentMask, ColorF color);
 
         void ClearRenderTargetDepthStencil(
             int layer,
+            int layerCount,
             float depthValue,
             bool depthMask,
             int stencilValue,
@@ -33,12 +34,13 @@ namespace Ryujinx.Graphics.GAL
             int firstIndex,
             int firstVertex,
             int firstInstance);
+        void DrawIndexedIndirect(BufferRange indirectBuffer);
+        void DrawIndexedIndirectCount(BufferRange indirectBuffer, BufferRange parameterBuffer, int maxDrawCount, int stride);
+        void DrawIndirect(BufferRange indirectBuffer);
+        void DrawIndirectCount(BufferRange indirectBuffer, BufferRange parameterBuffer, int maxDrawCount, int stride);
         void DrawTexture(ITexture texture, ISampler sampler, Extents2DF srcRegion, Extents2DF dstRegion);
 
         void EndTransformFeedback();
-
-        void MultiDrawIndirectCount(BufferRange indirectBuffer, BufferRange parameterBuffer, int maxDrawCount, int stride);
-        void MultiDrawIndexedIndirectCount(BufferRange indirectBuffer, BufferRange parameterBuffer, int maxDrawCount, int stride);
 
         void SetAlphaTest(bool enable, float reference, CompareOp op);
 

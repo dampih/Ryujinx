@@ -882,7 +882,8 @@ namespace Ryujinx.Graphics.Shader.CodeGen.Spirv
             if (src2 is AstOperand operand && operand.Type == OperandType.Constant)
             {
                 int attrOffset = (baseAttr.Value & AttributeConsts.Mask) + (operand.Value << 2);
-                return new OperationResult(resultType, context.GetAttribute(resultType, attrOffset, isOutAttr: false, index));
+                bool isOutAttr = (baseAttr.Value & AttributeConsts.LoadOutputMask) != 0;
+                return new OperationResult(resultType, context.GetAttribute(resultType, attrOffset, isOutAttr, index));
             }
             else
             {
@@ -1828,7 +1829,7 @@ namespace Ryujinx.Graphics.Shader.CodeGen.Spirv
 
                 if (texOp.Index < 2 || (type & SamplerType.Mask) == SamplerType.Texture3D)
                 {
-                    result = ScalingHelpers.ApplyUnscaling(context, texOp, result, isBindless, isIndexed);
+                    result = ScalingHelpers.ApplyUnscaling(context, texOp.WithType(type), result, isBindless, isIndexed);
                 }
 
                 return new OperationResult(AggregateType.S32, result);

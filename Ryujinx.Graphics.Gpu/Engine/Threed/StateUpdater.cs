@@ -34,13 +34,17 @@ namespace Ryujinx.Graphics.Gpu.Engine.Threed
 
         private ProgramPipelineState _pipeline;
 
+        private bool _vsUsesDrawParameters;
         private bool _vtgWritesRtLayer;
         private byte _vsClipDistancesWritten;
 
         private bool _prevDrawIndexed;
+        private bool _prevDrawIndirect;
         private IndexType _prevIndexType;
         private uint _prevFirstVertex;
         private bool _prevTfEnable;
+
+        private uint _prevRtNoAlphaMask;
 
         /// <summary>
         /// Creates a new instance of the state updater.
@@ -208,7 +212,7 @@ namespace Ryujinx.Graphics.Gpu.Engine.Threed
             // of the shader for the new state.
             if (_shaderSpecState != null)
             {
-                if (!_shaderSpecState.MatchesGraphics(_channel, GetPoolState(), GetGraphicsState(), false))
+                if (!_shaderSpecState.MatchesGraphics(_channel, GetPoolState(), GetGraphicsState(), _vsUsesDrawParameters, false))
                 {
                     ForceShaderUpdate();
                 }
@@ -233,6 +237,15 @@ namespace Ryujinx.Graphics.Gpu.Engine.Threed
                 }
 
                 _prevDrawIndexed = _drawState.DrawIndexed;
+            }
+
+            // Some draw parameters are used to restrict the vertex buffer size,
+            // but they can't be used on indirect draws because their values are unknown in this case.
+            // When switching between indirect and non-indirect draw, we need to
+            // make sure the vertex buffer sizes are still correct.
+            if (_drawState.DrawIndirect != _prevDrawIndirect)
+            {
+                _updateTracker.ForceDirty(VertexBufferStateIndex);
             }
 
             // In some cases, the index type is also used to guess the
@@ -280,9 +293,12 @@ namespace Ryujinx.Graphics.Gpu.Engine.Threed
         /// </summary>
         private void CommitBindings()
         {
+            var buffers = _channel.BufferManager;
+            var hasUnaligned = buffers.HasUnalignedStorageBuffers;
+
             UpdateStorageBuffers();
 
-            if (!_channel.TextureManager.CommitGraphicsBindings(_shaderSpecState))
+            if (!_channel.TextureManager.CommitGraphicsBindings(_shaderSpecState) || (buffers.HasUnalignedStorageBuffers != hasUnaligned))
             {
                 // Shader must be reloaded.
                 UpdateShaderState();
@@ -331,8 +347,8 @@ namespace Ryujinx.Graphics.Gpu.Engine.Threed
 
             _context.Renderer.Pipeline.SetPatchParameters(
                 _state.State.PatchVertices,
-                _state.State.TessOuterLevel.ToSpan(),
-                _state.State.TessInnerLevel.ToSpan());
+                _state.State.TessOuterLevel.AsSpan(),
+                _state.State.TessInnerLevel.AsSpan());
         }
 
         /// <summary>
@@ -398,6 +414,7 @@ namespace Ryujinx.Graphics.Gpu.Engine.Threed
             int clipRegionHeight = int.MaxValue;
 
             bool changedScale = false;
+            uint rtNoAlphaMask = 0;
 
             for (int index = 0; index < Constants.TotalRenderTargets; index++)
             {
@@ -410,6 +427,11 @@ namespace Ryujinx.Graphics.Gpu.Engine.Threed
                     changedScale |= _channel.TextureManager.SetRenderTargetColor(index, null);
 
                     continue;
+                }
+
+                if (colorState.Format.NoAlpha())
+                {
+                    rtNoAlphaMask |= 1u << index;
                 }
 
                 Image.Texture color = memoryManager.Physical.TextureCache.FindOrCreateTexture(
@@ -485,6 +507,13 @@ namespace Ryujinx.Graphics.Gpu.Engine.Threed
             }
 
             _channel.TextureManager.SetClipRegion(clipRegionWidth, clipRegionHeight);
+
+            if (useControl && _prevRtNoAlphaMask != rtNoAlphaMask)
+            {
+                _prevRtNoAlphaMask = rtNoAlphaMask;
+
+                UpdateBlendState();
+            }
         }
 
         /// <summary>
@@ -923,6 +952,9 @@ namespace Ryujinx.Graphics.Gpu.Engine.Threed
 
             _drawState.IsAnyVbInstanced = false;
 
+            bool drawIndexed = _drawState.DrawIndexed;
+            bool drawIndirect = _drawState.DrawIndirect;
+
             for (int index = 0; index < Constants.TotalVertexBuffers; index++)
             {
                 var vertexBuffer = _state.State.VertexBufferState[index];
@@ -950,14 +982,14 @@ namespace Ryujinx.Graphics.Gpu.Engine.Threed
                 ulong vbSize = endAddress.Pack() - address + 1;
                 ulong size;
 
-                if (_drawState.IbStreamer.HasInlineIndexData || _drawState.DrawIndexed || stride == 0 || instanced)
+                if (_drawState.IbStreamer.HasInlineIndexData || drawIndexed || stride == 0 || instanced)
                 {
                     // This size may be (much) larger than the real vertex buffer size.
                     // Avoid calculating it this way, unless we don't have any other option.
 
                     size = vbSize;
 
-                    if (stride > 0 && indexTypeSmall && _drawState.DrawIndexed && !instanced)
+                    if (stride > 0 && indexTypeSmall && drawIndexed && !drawIndirect && !instanced)
                     {
                         // If the index type is a small integer type, then we might be still able
                         // to reduce the vertex buffer size based on the maximum possible index value.
@@ -1056,44 +1088,80 @@ namespace Ryujinx.Graphics.Gpu.Engine.Threed
             bool blendIndependent = _state.State.BlendIndependent;
             ColorF blendConstant = _state.State.BlendConstant;
 
-            for (int index = 0; index < Constants.TotalRenderTargets; index++)
+            if (blendIndependent)
             {
-                BlendDescriptor descriptor;
-
-                if (blendIndependent)
+                for (int index = 0; index < Constants.TotalRenderTargets; index++)
                 {
                     bool enable = _state.State.BlendEnable[index];
                     var blend = _state.State.BlendState[index];
 
-                    descriptor = new BlendDescriptor(
+                    var descriptor = new BlendDescriptor(
                         enable,
                         blendConstant,
                         blend.ColorOp,
-                        blend.ColorSrcFactor,
-                        blend.ColorDstFactor,
+                        FilterBlendFactor(blend.ColorSrcFactor, index),
+                        FilterBlendFactor(blend.ColorDstFactor, index),
                         blend.AlphaOp,
-                        blend.AlphaSrcFactor,
-                        blend.AlphaDstFactor);
-                }
-                else
-                {
-                    bool enable = _state.State.BlendEnable[0];
-                    var blend = _state.State.BlendStateCommon;
+                        FilterBlendFactor(blend.AlphaSrcFactor, index),
+                        FilterBlendFactor(blend.AlphaDstFactor, index));
 
-                    descriptor = new BlendDescriptor(
-                        enable,
-                        blendConstant,
-                        blend.ColorOp,
-                        blend.ColorSrcFactor,
-                        blend.ColorDstFactor,
-                        blend.AlphaOp,
-                        blend.AlphaSrcFactor,
-                        blend.AlphaDstFactor);
+                    _pipeline.BlendDescriptors[index] = descriptor;
+                    _context.Renderer.Pipeline.SetBlendState(index, descriptor);
                 }
-
-                _pipeline.BlendDescriptors[index] = descriptor;
-                _context.Renderer.Pipeline.SetBlendState(index, descriptor);
             }
+            else
+            {
+                bool enable = _state.State.BlendEnable[0];
+                var blend = _state.State.BlendStateCommon;
+
+                var descriptor = new BlendDescriptor(
+                    enable,
+                    blendConstant,
+                    blend.ColorOp,
+                    FilterBlendFactor(blend.ColorSrcFactor, 0),
+                    FilterBlendFactor(blend.ColorDstFactor, 0),
+                    blend.AlphaOp,
+                    FilterBlendFactor(blend.AlphaSrcFactor, 0),
+                    FilterBlendFactor(blend.AlphaDstFactor, 0));
+
+                for (int index = 0; index < Constants.TotalRenderTargets; index++)
+                {
+                    _pipeline.BlendDescriptors[index] = descriptor;
+                    _context.Renderer.Pipeline.SetBlendState(index, descriptor);
+                }
+            }
+        }
+
+        /// <summary>
+        /// Gets a blend factor for the color target currently.
+        /// This will return <paramref name="factor"/> unless the target format has no alpha component,
+        /// in which case it will replace destination alpha factor with a constant factor of one or zero.
+        /// </summary>
+        /// <param name="factor">Input factor</param>
+        /// <param name="index">Color target index</param>
+        /// <returns>New blend factor</returns>
+        private BlendFactor FilterBlendFactor(BlendFactor factor, int index)
+        {
+            // If any color target format without alpha is being used, we need to make sure that
+            // if blend is active, it will not use destination alpha as a factor.
+            // That is required because RGBX formats are emulated using host RGBA formats.
+
+            if (_state.State.RtColorState[index].Format.NoAlpha())
+            {
+                switch (factor)
+                {
+                    case BlendFactor.DstAlpha:
+                    case BlendFactor.DstAlphaGl:
+                        factor = BlendFactor.One;
+                        break;
+                    case BlendFactor.OneMinusDstAlpha:
+                    case BlendFactor.OneMinusDstAlphaGl:
+                        factor = BlendFactor.Zero;
+                        break;
+                }
+            }
+
+            return factor;
         }
 
         /// <summary>
@@ -1156,6 +1224,7 @@ namespace Ryujinx.Graphics.Gpu.Engine.Threed
             byte oldVsClipDistancesWritten = _vsClipDistancesWritten;
 
             _drawState.VsUsesInstanceId = gs.Shaders[1]?.Info.UsesInstanceId ?? false;
+            _vsUsesDrawParameters = gs.Shaders[1]?.Info.UsesDrawParameters ?? false;
             _vsClipDistancesWritten = gs.Shaders[1]?.Info.ClipDistancesWritten ?? 0;
 
             if (oldVsClipDistancesWritten != _vsClipDistancesWritten)
@@ -1171,6 +1240,11 @@ namespace Ryujinx.Graphics.Gpu.Engine.Threed
             _context.Renderer.Pipeline.SetProgram(gs.HostProgram);
         }
 
+        /// <summary>
+        /// Updates bindings consumed by the shader stage on the texture and buffer managers.
+        /// </summary>
+        /// <param name="stage">Shader stage to have the bindings updated</param>
+        /// <param name="info">Shader stage bindings info</param>
         private void UpdateStageBindings(int stage, ShaderProgramInfo info)
         {
             _currentProgramInfo[stage] = info;
@@ -1242,6 +1316,10 @@ namespace Ryujinx.Graphics.Gpu.Engine.Threed
             _channel.BufferManager.SetGraphicsUniformBufferBindings(stage, info.CBuffers);
         }
 
+        /// <summary>
+        /// Gets the current texture pool state.
+        /// </summary>
+        /// <returns>Texture pool state</returns>
         private GpuChannelPoolState GetPoolState()
         {
             return new GpuChannelPoolState(
@@ -1262,10 +1340,12 @@ namespace Ryujinx.Graphics.Gpu.Engine.Threed
 
             for (int location = 0; location < attributeTypes.Length; location++)
             {
-                attributeTypes[location] = vertexAttribState[location].UnpackType() switch
+                VertexAttribType type = vertexAttribState[location].UnpackType();
+
+                attributeTypes[location] = type switch
                 {
-                    3 => AttributeType.Sint,
-                    4 => AttributeType.Uint,
+                    VertexAttribType.Sint => AttributeType.Sint,
+                    VertexAttribType.Uint => AttributeType.Uint,
                     _ => AttributeType.Float
                 };
             }
@@ -1283,9 +1363,15 @@ namespace Ryujinx.Graphics.Gpu.Engine.Threed
                 _state.State.AlphaTestEnable,
                 _state.State.AlphaTestFunc,
                 _state.State.AlphaTestRef,
-                ref attributeTypes);
+                ref attributeTypes,
+                _drawState.HasConstantBufferDrawParameters,
+                _channel.BufferManager.HasUnalignedStorageBuffers);
         }
 
+        /// <summary>
+        /// Gets the depth mode that is currently being used (zero to one or minus one to one).
+        /// </summary>
+        /// <returns>Current depth mode</returns>
         private DepthMode GetDepthMode()
         {
             ref var transform = ref _state.State.ViewportTransform[0];

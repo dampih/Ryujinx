@@ -28,6 +28,7 @@ namespace Ryujinx.Ui
     using Image = SixLabors.ImageSharp.Image;
     using Key = Input.Key;
     using Switch = HLE.Switch;
+    using UpscaleType = Graphics.GAL.UpscaleType;
 
     public abstract class RendererWidgetBase : DrawingArea
     {
@@ -35,6 +36,7 @@ namespace Ryujinx.Ui
         private const int SwitchPanelHeight = 720;
         private const int TargetFps = 60;
         private const float MaxResolutionScale = 4.0f; // Max resolution hotkeys can scale to before wrapping.
+        private const float VolumeDelta = 0.05f;
 
         public ManualResetEvent WaitEvent { get; set; }
         public NpadManager NpadManager { get; }
@@ -57,6 +59,7 @@ namespace Ryujinx.Ui
         private readonly long _ticksPerFrame;
 
         private long _ticks = 0;
+        private float _newVolume;
 
         private readonly Stopwatch _chrono;
 
@@ -115,11 +118,26 @@ namespace Ryujinx.Ui
             _lastCursorMoveTime = Stopwatch.GetTimestamp();
 
             ConfigurationState.Instance.HideCursorOnIdle.Event += HideCursorStateChanged;
+            ConfigurationState.Instance.Graphics.AntiAliasing.Event += UpdateAnriAliasing;
+            ConfigurationState.Instance.Graphics.UpscaleType.Event += UpdateUpscaleType;
+            ConfigurationState.Instance.Graphics.UpscaleLevel.Event += UpdateUpscaleLevel;
+        }
+
+        private void UpdateUpscaleLevel(object sender, ReactiveEventArgs<float> e)
+        {
+            Renderer.Window.SetUpscaler((UpscaleType)ConfigurationState.Instance.Graphics.UpscaleType.Value);
+            Renderer.Window.SetUpscalerLevel(ConfigurationState.Instance.Graphics.UpscaleLevel.Value);
+        }
+
+        private void UpdateUpscaleType(object sender, ReactiveEventArgs<Ryujinx.Common.Configuration.UpscaleType> e)
+        {
+            Renderer.Window.SetUpscaler((UpscaleType)ConfigurationState.Instance.Graphics.UpscaleType.Value);
+            Renderer.Window.SetUpscalerLevel(ConfigurationState.Instance.Graphics.UpscaleLevel.Value);
         }
 
         public abstract void InitializeRenderer();
 
-        public abstract void SwapBuffers(object image);
+        public abstract void SwapBuffers();
 
         protected abstract string GetGpuBackendName();
 
@@ -148,9 +166,17 @@ namespace Ryujinx.Ui
         private void Renderer_Destroyed(object sender, EventArgs e)
         {
             ConfigurationState.Instance.HideCursorOnIdle.Event -= HideCursorStateChanged;
+            ConfigurationState.Instance.Graphics.AntiAliasing.Event -= UpdateAnriAliasing;
+            ConfigurationState.Instance.Graphics.UpscaleType.Event -= UpdateUpscaleType;
+            ConfigurationState.Instance.Graphics.UpscaleLevel.Event -= UpdateUpscaleLevel;
 
             NpadManager.Dispose();
             Dispose();
+        }
+
+        private void UpdateAnriAliasing(object sender, ReactiveEventArgs<Ryujinx.Common.Configuration.AntiAliasing> e)
+        {
+            Renderer?.Window.SetAntiAliasing((Graphics.GAL.AntiAliasing)e.NewValue);
         }
 
         protected override bool OnMotionNotifyEvent(EventMotion evnt)
@@ -393,6 +419,10 @@ namespace Ryujinx.Ui
 
             Device.Gpu.Renderer.Initialize(_glLogLevel);
 
+            Renderer.Window.SetAntiAliasing((Graphics.GAL.AntiAliasing)ConfigurationState.Instance.Graphics.AntiAliasing.Value);
+            Renderer.Window.SetUpscaler((Graphics.GAL.UpscaleType)ConfigurationState.Instance.Graphics.UpscaleType.Value);
+            Renderer.Window.SetUpscalerLevel(ConfigurationState.Instance.Graphics.UpscaleLevel.Value);
+
             _gpuBackendName = GetGpuBackendName();
             _gpuVendorName = GetGpuVendorName();
 
@@ -401,6 +431,8 @@ namespace Ryujinx.Ui
                 Device.Gpu.SetGpuThread();
                 Device.Gpu.InitializeShaderCache(_gpuCancellationTokenSource.Token);
                 Translator.IsReadyForTranslation.Set();
+
+                Renderer.Window.ChangeVSyncMode(Device.EnableDeviceVsync);
 
                 (Toplevel as MainWindow)?.ActivatePauseMenu();
 
@@ -424,7 +456,7 @@ namespace Ryujinx.Ui
 
                     while (Device.ConsumeFrameAvailable())
                     {
-                        Device.PresentFrame((texture) => { SwapBuffers(texture);});
+                        Device.PresentFrame(SwapBuffers);
                     }
 
                     if (_ticks >= _ticksPerFrame)
@@ -641,6 +673,20 @@ namespace Ryujinx.Ui
                     (MaxResolutionScale + GraphicsConfig.ResScale - 2) % MaxResolutionScale + 1;
                 }
 
+                if (currentHotkeyState.HasFlag(KeyboardHotkeyState.VolumeUp) &&
+                    !_prevHotkeyState.HasFlag(KeyboardHotkeyState.VolumeUp))
+                {
+                    _newVolume = MathF.Round((Device.GetVolume() + VolumeDelta), 2);
+                    Device.SetVolume(_newVolume);
+                }
+
+                if (currentHotkeyState.HasFlag(KeyboardHotkeyState.VolumeDown) &&
+                    !_prevHotkeyState.HasFlag(KeyboardHotkeyState.VolumeDown))
+                {
+                    _newVolume = MathF.Round((Device.GetVolume() - VolumeDelta), 2);
+                    Device.SetVolume(_newVolume);
+                }
+
                 _prevHotkeyState = currentHotkeyState;
             }
 
@@ -673,7 +719,9 @@ namespace Ryujinx.Ui
             Pause = 1 << 3,
             ToggleMute = 1 << 4,
             ResScaleUp = 1 << 5,
-            ResScaleDown = 1 << 6
+            ResScaleDown = 1 << 6,
+            VolumeUp = 1 << 7,
+            VolumeDown = 1 << 8
         }
 
         private KeyboardHotkeyState GetHotkeyState()
@@ -713,6 +761,16 @@ namespace Ryujinx.Ui
             if (_keyboardInterface.IsPressed((Key)ConfigurationState.Instance.Hid.Hotkeys.Value.ResScaleDown))
             {
                 state |= KeyboardHotkeyState.ResScaleDown;
+            }
+
+            if (_keyboardInterface.IsPressed((Key)ConfigurationState.Instance.Hid.Hotkeys.Value.VolumeUp))
+            {
+                state |= KeyboardHotkeyState.VolumeUp;
+            }
+
+            if (_keyboardInterface.IsPressed((Key)ConfigurationState.Instance.Hid.Hotkeys.Value.VolumeDown))
+            {
+                state |= KeyboardHotkeyState.VolumeDown;
             }
 
             return state;

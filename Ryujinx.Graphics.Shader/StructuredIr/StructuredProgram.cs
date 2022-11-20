@@ -71,12 +71,12 @@ namespace Ryujinx.Graphics.Shader.StructuredIr
                     var locations = config.GpuAccessor.QueryTransformFeedbackVaryingLocations(tfbIndex);
                     var stride = config.GpuAccessor.QueryTransformFeedbackStride(tfbIndex);
 
-                    for (int j = 0; j < locations.Length; j++)
+                    for (int i = 0; i < locations.Length; i++)
                     {
-                        byte location = locations[j];
+                        byte location = locations[i];
                         if (location < 0xc0)
                         {
-                            context.Info.TransformFeedbackOutputs[location] = new TransformFeedbackOutput(tfbIndex, j * 4, stride);
+                            context.Info.TransformFeedbackOutputs[location] = new TransformFeedbackOutput(tfbIndex, i * 4, stride);
                         }
                     }
                 }
@@ -97,7 +97,15 @@ namespace Ryujinx.Graphics.Shader.StructuredIr
                 if (src1.Type == OperandType.Constant && src2.Type == OperandType.Constant)
                 {
                     int attrOffset = (src1.Value & AttributeConsts.Mask) + (src2.Value << 2);
-                    context.Info.Inputs.Add(attrOffset);
+
+                    if ((src1.Value & AttributeConsts.LoadOutputMask) != 0)
+                    {
+                        context.Info.Outputs.Add(attrOffset);
+                    }
+                    else
+                    {
+                        context.Info.Inputs.Add(attrOffset);
+                    }
                 }
             }
 
