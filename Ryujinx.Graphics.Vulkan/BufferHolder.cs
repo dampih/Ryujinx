@@ -18,12 +18,12 @@ namespace Ryujinx.Graphics.Vulkan
         private const int FlushCountThreshold = 5;
 
         public const AccessFlags DefaultAccessFlags =
-            AccessFlags.AccessIndirectCommandReadBit |
-            AccessFlags.AccessShaderReadBit |
-            AccessFlags.AccessShaderWriteBit |
-            AccessFlags.AccessTransferReadBit |
-            AccessFlags.AccessTransferWriteBit |
-            AccessFlags.AccessUniformReadBit;
+            AccessFlags.IndirectCommandReadBit |
+            AccessFlags.ShaderReadBit |
+            AccessFlags.ShaderWriteBit |
+            AccessFlags.TransferReadBit |
+            AccessFlags.TransferWriteBit |
+            AccessFlags.UniformReadBit;
 
         private readonly VulkanRenderer _gd;
         private readonly Device _device;
@@ -223,9 +223,9 @@ namespace Ryujinx.Graphics.Vulkan
 
                 _gd.Api.CmdPipelineBarrier(
                     commandBuffer,
-                    PipelineStageFlags.PipelineStageAllCommandsBit,
-                    PipelineStageFlags.PipelineStageAllCommandsBit,
-                    DependencyFlags.DependencyDeviceGroupBit,
+                    PipelineStageFlags.AllCommandsBit,
+                    PipelineStageFlags.AllCommandsBit,
+                    DependencyFlags.DeviceGroupBit,
                     1,
                     memoryBarrier,
                     0,
@@ -501,9 +501,9 @@ namespace Ryujinx.Graphics.Vulkan
                 cbs.CommandBuffer,
                 dstBuffer,
                 BufferHolder.DefaultAccessFlags,
-                AccessFlags.AccessTransferWriteBit,
-                PipelineStageFlags.PipelineStageAllCommandsBit,
-                PipelineStageFlags.PipelineStageTransferBit,
+                AccessFlags.TransferWriteBit,
+                PipelineStageFlags.AllCommandsBit,
+                PipelineStageFlags.TransferBit,
                 dstOffset,
                 data.Length);
 
@@ -521,10 +521,10 @@ namespace Ryujinx.Graphics.Vulkan
                 _gd,
                 cbs.CommandBuffer,
                 dstBuffer,
-                AccessFlags.AccessTransferWriteBit,
+                AccessFlags.TransferWriteBit,
                 BufferHolder.DefaultAccessFlags,
-                PipelineStageFlags.PipelineStageTransferBit,
-                PipelineStageFlags.PipelineStageAllCommandsBit,
+                PipelineStageFlags.TransferBit,
+                PipelineStageFlags.AllCommandsBit,
                 dstOffset,
                 data.Length);
 
@@ -548,9 +548,9 @@ namespace Ryujinx.Graphics.Vulkan
                 cbs.CommandBuffer,
                 dstBuffer,
                 BufferHolder.DefaultAccessFlags,
-                AccessFlags.AccessTransferWriteBit,
-                PipelineStageFlags.PipelineStageAllCommandsBit,
-                PipelineStageFlags.PipelineStageTransferBit,
+                AccessFlags.TransferWriteBit,
+                PipelineStageFlags.AllCommandsBit,
+                PipelineStageFlags.TransferBit,
                 dstOffset,
                 size);
 
@@ -562,10 +562,10 @@ namespace Ryujinx.Graphics.Vulkan
                 gd,
                 cbs.CommandBuffer,
                 dstBuffer,
-                AccessFlags.AccessTransferWriteBit,
+                AccessFlags.TransferWriteBit,
                 BufferHolder.DefaultAccessFlags,
-                PipelineStageFlags.PipelineStageTransferBit,
-                PipelineStageFlags.PipelineStageAllCommandsBit,
+                PipelineStageFlags.TransferBit,
+                PipelineStageFlags.AllCommandsBit,
                 dstOffset,
                 size);
         }
