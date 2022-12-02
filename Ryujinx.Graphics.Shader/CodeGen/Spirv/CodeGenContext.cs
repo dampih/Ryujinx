@@ -3,7 +3,6 @@ using Ryujinx.Graphics.Shader.Translation;
 using Spv.Generator;
 using System;
 using System.Collections.Generic;
-using System.Linq;
 using static Spv.Specification;
 
 namespace Ryujinx.Graphics.Shader.CodeGen.Spirv
@@ -18,7 +17,7 @@ namespace Ryujinx.Graphics.Shader.CodeGen.Spirv
         private const uint SpirvVersionRevision = 0;
         private const uint SpirvVersionPacked = (SpirvVersionMajor << 16) | (SpirvVersionMinor << 8) | SpirvVersionRevision;
 
-        private readonly StructuredProgramInfo _info;
+        public StructuredProgramInfo Info { get; }
 
         public ShaderConfig Config { get; }
 
@@ -86,7 +85,7 @@ namespace Ryujinx.Graphics.Shader.CodeGen.Spirv
             GeneratorPool<Instruction> instPool,
             GeneratorPool<LiteralInteger> integerPool) : base(SpirvVersionPacked, instPool, integerPool)
         {
-            _info = info;
+            Info = info;
             Config = config;
 
             if (config.Stage == ShaderStage.Geometry)
@@ -234,12 +233,23 @@ namespace Ryujinx.Graphics.Shader.CodeGen.Spirv
                     IrOperandType.Constant => GetConstant(type, operand),
                     IrOperandType.ConstantBuffer => GetConstantBuffer(type, operand),
                     IrOperandType.LocalVariable => GetLocal(type, operand),
-                    IrOperandType.Undefined => Undef(GetType(type)),
+                    IrOperandType.Undefined => GetUndefined(type),
                     _ => throw new ArgumentException($"Invalid operand type \"{operand.Type}\".")
                 };
             }
 
             throw new NotImplementedException(node.GetType().Name);
+        }
+
+        private Instruction GetUndefined(AggregateType type)
+        {
+            return type switch
+            {
+                AggregateType.Bool => ConstantFalse(TypeBool()),
+                AggregateType.FP32 => Constant(TypeFP32(), 0f),
+                AggregateType.FP64 => Constant(TypeFP64(), 0d),
+                _ => Constant(GetType(type), 0)
+            };
         }
 
         public Instruction GetAttributeElemPointer(int attr, bool isOutAttr, Instruction index, out AggregateType elemType)
@@ -252,6 +262,13 @@ namespace Ryujinx.Graphics.Shader.CodeGen.Spirv
 
             Instruction ioVariable, elemIndex;
 
+            Instruction invocationId = null;
+
+            if (Config.Stage == ShaderStage.TessellationControl && isOutAttr)
+            {
+                invocationId = Load(TypeS32(), Inputs[AttributeConsts.InvocationId]);
+            }
+
             bool isUserAttr = attr >= AttributeConsts.UserAttributeBase && attr < AttributeConsts.UserAttributeEnd;
 
             if (isUserAttr &&
@@ -263,7 +280,17 @@ namespace Ryujinx.Graphics.Shader.CodeGen.Spirv
                 elemIndex = Constant(TypeU32(), attrInfo.GetInnermostIndex());
                 var vecIndex = Constant(TypeU32(), (attr - AttributeConsts.UserAttributeBase) >> 4);
 
-                if (AttributeInfo.IsArrayAttributeSpirv(Config.Stage, isOutAttr))
+                bool isArray = AttributeInfo.IsArrayAttributeSpirv(Config.Stage, isOutAttr);
+
+                if (invocationId != null && isArray)
+                {
+                    return AccessChain(TypePointer(storageClass, GetType(elemType)), ioVariable, invocationId, index, vecIndex, elemIndex);
+                }
+                else if (invocationId != null)
+                {
+                    return AccessChain(TypePointer(storageClass, GetType(elemType)), ioVariable, invocationId, vecIndex, elemIndex);
+                }
+                else if (isArray)
                 {
                     return AccessChain(TypePointer(storageClass, GetType(elemType)), ioVariable, index, vecIndex, elemIndex);
                 }
@@ -290,6 +317,18 @@ namespace Ryujinx.Graphics.Shader.CodeGen.Spirv
             {
                 attrOffset = attr;
                 type = elemType;
+
+                if (Config.LastInPipeline && isOutAttr)
+                {
+                    int components = Info.GetTransformFeedbackOutputComponents(attr);
+
+                    if (components > 1)
+                    {
+                        attrOffset &= ~0xf;
+                        type = AggregateType.Vector | AggregateType.FP32;
+                        attrInfo = new AttributeInfo(attrOffset, (attr - attrOffset) / 4, components, type, false);
+                    }
+                }
             }
 
             ioVariable = isOutAttr ? Outputs[attrOffset] : Inputs[attrOffset];
@@ -298,12 +337,29 @@ namespace Ryujinx.Graphics.Shader.CodeGen.Spirv
 
             if ((type & (AggregateType.Array | AggregateType.Vector)) == 0)
             {
-                return isIndexed ? AccessChain(TypePointer(storageClass, GetType(elemType)), ioVariable, index) : ioVariable;
+                if (invocationId != null)
+                {
+                    return isIndexed
+                        ? AccessChain(TypePointer(storageClass, GetType(elemType)), ioVariable, invocationId, index)
+                        : AccessChain(TypePointer(storageClass, GetType(elemType)), ioVariable, invocationId);
+                }
+                else
+                {
+                    return isIndexed ? AccessChain(TypePointer(storageClass, GetType(elemType)), ioVariable, index) : ioVariable;
+                }
             }
 
             elemIndex = Constant(TypeU32(), attrInfo.GetInnermostIndex());
 
-            if (isIndexed)
+            if (invocationId != null && isIndexed)
+            {
+                return AccessChain(TypePointer(storageClass, GetType(elemType)), ioVariable, invocationId, index, elemIndex);
+            }
+            else if (invocationId != null)
+            {
+                return AccessChain(TypePointer(storageClass, GetType(elemType)), ioVariable, invocationId, elemIndex);
+            }
+            else if (isIndexed)
             {
                 return AccessChain(TypePointer(storageClass, GetType(elemType)), ioVariable, index, elemIndex);
             }
@@ -317,12 +373,29 @@ namespace Ryujinx.Graphics.Shader.CodeGen.Spirv
         {
             var storageClass = isOutAttr ? StorageClass.Output : StorageClass.Input;
 
+            Instruction invocationId = null;
+
+            if (Config.Stage == ShaderStage.TessellationControl && isOutAttr)
+            {
+                invocationId = Load(TypeS32(), Inputs[AttributeConsts.InvocationId]);
+            }
+
             elemType = AggregateType.FP32;
             var ioVariable = isOutAttr ? OutputsArray : InputsArray;
             var vecIndex = ShiftRightLogical(TypeS32(), attrIndex, Constant(TypeS32(), 2));
             var elemIndex = BitwiseAnd(TypeS32(), attrIndex, Constant(TypeS32(), 3));
 
-            if (AttributeInfo.IsArrayAttributeSpirv(Config.Stage, isOutAttr))
+            bool isArray = AttributeInfo.IsArrayAttributeSpirv(Config.Stage, isOutAttr);
+
+            if (invocationId != null && isArray)
+            {
+                return AccessChain(TypePointer(storageClass, GetType(elemType)), ioVariable, invocationId, index, vecIndex, elemIndex);
+            }
+            else if (invocationId != null)
+            {
+                return AccessChain(TypePointer(storageClass, GetType(elemType)), ioVariable, invocationId, vecIndex, elemIndex);
+            }
+            else if (isArray)
             {
                 return AccessChain(TypePointer(storageClass, GetType(elemType)), ioVariable, index, vecIndex, elemIndex);
             }
@@ -372,16 +445,12 @@ namespace Ryujinx.Graphics.Shader.CodeGen.Spirv
         public Instruction GetAttributePerPatchElemPointer(int attr, bool isOutAttr, out AggregateType elemType)
         {
             var storageClass = isOutAttr ? StorageClass.Output : StorageClass.Input;
-            var attrInfo = AttributeInfo.From(Config, attr, isOutAttr);
+            var attrInfo = AttributeInfo.FromPatch(Config, attr, isOutAttr);
 
             int attrOffset = attrInfo.BaseValue;
-            Instruction ioVariable;
-
-            bool isUserAttr = attr >= AttributeConsts.UserAttributeBase && attr < AttributeConsts.UserAttributeEnd;
+            Instruction ioVariable = isOutAttr ? OutputsPerPatch[attrOffset] : InputsPerPatch[attrOffset];
 
             elemType = attrInfo.Type & AggregateType.ElementTypeMask;
-
-            ioVariable = isOutAttr ? OutputsPerPatch[attrOffset] : InputsPerPatch[attrOffset];
 
             if ((attrInfo.Type & (AggregateType.Array | AggregateType.Vector)) == 0)
             {
@@ -394,7 +463,7 @@ namespace Ryujinx.Graphics.Shader.CodeGen.Spirv
 
         public Instruction GetAttributePerPatch(AggregateType type, int attr, bool isOutAttr)
         {
-            if (!AttributeInfo.Validate(Config, attr, isOutAttr: false))
+            if (!AttributeInfo.ValidatePerPatch(Config, attr, isOutAttr: false))
             {
                 return GetConstant(type, new AstOperand(IrOperandType.Constant, 0));
             }
@@ -477,18 +546,6 @@ namespace Ryujinx.Graphics.Shader.CodeGen.Spirv
         public (StructuredFunction, Instruction) GetFunction(int funcIndex)
         {
             return _functions[funcIndex];
-        }
-
-        public TransformFeedbackOutput GetTransformFeedbackOutput(int location, int component)
-        {
-            int index = (AttributeConsts.UserAttributeBase / 4) + location * 4 + component;
-            return _info.TransformFeedbackOutputs[index];
-        }
-
-        public TransformFeedbackOutput GetTransformFeedbackOutput(int location)
-        {
-            int index = location / 4;
-            return _info.TransformFeedbackOutputs[index];
         }
 
         public Instruction GetType(AggregateType type, int length = 1)

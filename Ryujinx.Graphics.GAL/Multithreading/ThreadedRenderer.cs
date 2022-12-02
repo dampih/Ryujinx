@@ -6,7 +6,6 @@ using Ryujinx.Graphics.GAL.Multithreading.Commands.Renderer;
 using Ryujinx.Graphics.GAL.Multithreading.Model;
 using Ryujinx.Graphics.GAL.Multithreading.Resources;
 using Ryujinx.Graphics.GAL.Multithreading.Resources.Programs;
-using Ryujinx.Graphics.Shader;
 using System;
 using System.Diagnostics;
 using System.Runtime.CompilerServices;
@@ -250,10 +249,10 @@ namespace Ryujinx.Graphics.GAL.Multithreading
             }
         }
 
-        public BufferHandle CreateBuffer(int size)
+        public BufferHandle CreateBuffer(int size, BufferHandle storageHint)
         {
             BufferHandle handle = Buffers.CreateBufferHandle();
-            New<CreateBufferCommand>().Set(handle, size);
+            New<CreateBufferCommand>().Set(handle, size, storageHint);
             QueueCommand();
 
             return handle;
@@ -314,7 +313,7 @@ namespace Ryujinx.Graphics.GAL.Multithreading
             QueueCommand();
         }
 
-        public ReadOnlySpan<byte> GetBufferData(BufferHandle buffer, int offset, int size)
+        public PinnedSpan<byte> GetBufferData(BufferHandle buffer, int offset, int size)
         {
             if (IsGpuThread())
             {
@@ -322,7 +321,7 @@ namespace Ryujinx.Graphics.GAL.Multithreading
                 New<BufferGetDataCommand>().Set(buffer, offset, size, Ref(box));
                 InvokeCommand();
 
-                return box.Result.Get();
+                return box.Result;
             }
             else
             {
@@ -337,6 +336,11 @@ namespace Ryujinx.Graphics.GAL.Multithreading
             InvokeCommand();
 
             return box.Result;
+        }
+
+        public ulong GetCurrentSync()
+        {
+            return _baseRenderer.GetCurrentSync();
         }
 
         public HardwareInfo GetHardwareInfo()
@@ -423,7 +427,11 @@ namespace Ryujinx.Graphics.GAL.Multithreading
 
             // Stop the GPU thread.
             _disposed = true;
-            _gpuThread.Join();
+
+            if (_gpuThread != null && _gpuThread.IsAlive)
+            {
+                _gpuThread.Join();
+            }
 
             // Dispose the renderer.
             _baseRenderer.Dispose();

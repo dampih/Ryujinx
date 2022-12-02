@@ -25,8 +25,6 @@ using System.IO;
 using System.Linq;
 using System.Reflection;
 using System.Text;
-
-using static LibHac.Fs.ApplicationSaveDataManagement;
 using static Ryujinx.HLE.HOS.ModLoader;
 using ApplicationId = LibHac.Ncm.ApplicationId;
 using Path = System.IO.Path;
@@ -852,7 +850,7 @@ namespace Ryujinx.HLE.HOS
             for (int i = 0; i < programCount; i++)
             {
                 mapInfo[i].ProgramId = new ProgramId(applicationId + (uint)i);
-                mapInfo[i].MainProgramId = new ProgramId(applicationId);
+                mapInfo[i].MainProgramId = new ApplicationId(applicationId);
                 mapInfo[i].ProgramIndex = (byte)i;
             }
 

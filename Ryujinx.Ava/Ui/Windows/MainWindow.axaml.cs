@@ -12,7 +12,6 @@ using Ryujinx.Ava.Ui.Applet;
 using Ryujinx.Ava.Ui.Controls;
 using Ryujinx.Ava.Ui.Models;
 using Ryujinx.Ava.Ui.ViewModels;
-using Ryujinx.Ava.Ui.Vulkan;
 using Ryujinx.Common.Configuration;
 using Ryujinx.Common.Logging;
 using Ryujinx.Graphics.Gpu;
@@ -24,10 +23,10 @@ using Ryujinx.Modules;
 using Ryujinx.Ui.App.Common;
 using Ryujinx.Ui.Common;
 using Ryujinx.Ui.Common.Configuration;
+using Ryujinx.Ui.Common.Helper;
 using SixLabors.ImageSharp.PixelFormats;
 using System;
 using System.ComponentModel;
-using System.Diagnostics;
 using System.IO;
 using System.Threading;
 using System.Threading.Tasks;
@@ -37,6 +36,7 @@ namespace Ryujinx.Ava.Ui.Windows
 {
     public partial class MainWindow : StyleableWindow
     {
+        internal static MainWindowViewModel MainWindowViewModel { get; private set; }
         private bool _canUpdate;
         private bool _isClosing;
         private bool _isLoading;
@@ -60,7 +60,7 @@ namespace Ryujinx.Ava.Ui.Windows
         internal AppHost AppHost { get; private set; }
         public InputManager InputManager { get; private set; }
 
-        internal RendererControl RendererControl { get; private set; }
+        internal RendererHost RendererControl { get; private set; }
         internal MainWindowViewModel ViewModel { get; private set; }
         public SettingsWindow SettingsWindow { get; set; }
 
@@ -82,6 +82,8 @@ namespace Ryujinx.Ava.Ui.Windows
         {
             ViewModel = new MainWindowViewModel(this);
 
+            MainWindowViewModel = ViewModel;
+
             DataContext = ViewModel;
 
             InitializeComponent();
@@ -91,8 +93,10 @@ namespace Ryujinx.Ava.Ui.Windows
 
             Title = $"Ryujinx {Program.Version}";
 
-            Height = Height / Program.WindowScaleFactor;
-            Width = Width / Program.WindowScaleFactor;
+            // NOTE: Height of MenuBar and StatusBar is not usable here, since it would still be 0 at this point.
+            double barHeight = MenuBar.MinHeight + StatusBar.MinHeight;
+            Height = ((Height - barHeight) / Program.WindowScaleFactor) + barHeight;
+            Width /= Program.WindowScaleFactor;
 
             if (Program.PreviewerDetached)
             {
@@ -140,6 +144,7 @@ namespace Ryujinx.Ava.Ui.Windows
                     ViewModel.DockedStatusText = args.DockedMode;
                     ViewModel.AspectRatioStatusText = args.AspectRatio;
                     ViewModel.GameStatusText = args.GameStatus;
+                    ViewModel.VolumeStatusText = args.VolumeStatus;
                     ViewModel.FifoStatusText = args.FifoStatus;
                     ViewModel.GpuNameText = args.GpuName;
                     ViewModel.BackendText = args.GpuBackend;
@@ -239,27 +244,41 @@ namespace Ryujinx.Ava.Ui.Windows
 
             _mainViewContent = MainContent.Content as Control;
 
-            RendererControl = Program.UseVulkan ? new VulkanRendererControl(ConfigurationState.Instance.Logger.GraphicsDebugLevel) : new OpenGLRendererControl(3, 3, ConfigurationState.Instance.Logger.GraphicsDebugLevel);
-            AppHost = new AppHost(RendererControl, InputManager, path, VirtualFileSystem, ContentManager, AccountManager, _userChannelPersistence, this);
-
-            if (!AppHost.LoadGuestApplication().Result)
+            RendererControl = new RendererHost(ConfigurationState.Instance.Logger.GraphicsDebugLevel);
+            if (ConfigurationState.Instance.Graphics.GraphicsBackend.Value == GraphicsBackend.OpenGl)
             {
-                AppHost.DisposeContext();
-
-                return;
+                RendererControl.CreateOpenGL();
+            }
+            else
+            {
+                RendererControl.CreateVulkan();
             }
 
-            ViewModel.LoadHeading = string.IsNullOrWhiteSpace(titleName) ? string.Format(LocaleManager.Instance["LoadingHeading"], AppHost.Device.Application.TitleName) : titleName;
-            ViewModel.TitleName = string.IsNullOrWhiteSpace(titleName) ? AppHost.Device.Application.TitleName : titleName;
+            AppHost = new AppHost(RendererControl, InputManager, path, VirtualFileSystem, ContentManager, AccountManager, _userChannelPersistence, this);
 
-            SwitchToGameControl(startFullscreen);
-
-            _currentEmulatedGamePath = path;
-            Thread gameThread = new Thread(InitializeGame)
+            Dispatcher.UIThread.Post(async () =>
             {
-                Name = "GUI.WindowThread"
-            };
-            gameThread.Start();
+                if (!await AppHost.LoadGuestApplication())
+                {
+                    AppHost.DisposeContext();
+                    AppHost = null;
+
+                    return;
+                }
+
+                ViewModel.LoadHeading = string.IsNullOrWhiteSpace(titleName) ? string.Format(LocaleManager.Instance["LoadingHeading"], AppHost.Device.Application.TitleName) : titleName;
+                ViewModel.TitleName   = string.IsNullOrWhiteSpace(titleName) ? AppHost.Device.Application.TitleName : titleName;
+
+                SwitchToGameControl(startFullscreen);
+
+                _currentEmulatedGamePath = path;
+
+                Thread gameThread = new(InitializeGame)
+                {
+                    Name = "GUI.WindowThread"
+                };
+                gameThread.Start();
+            });
         }
 
         private void InitializeGame()
@@ -298,8 +317,8 @@ namespace Ryujinx.Ava.Ui.Windows
 
         public void SwitchToGameControl(bool startFullscreen = false)
         {
-            ViewModel.ShowContent = true;
             ViewModel.ShowLoadProgress = false;
+            ViewModel.ShowContent = true;
             ViewModel.IsLoadingIndeterminate = false;
 
             Dispatcher.UIThread.InvokeAsync(() =>
@@ -348,16 +367,16 @@ namespace Ryujinx.Ava.Ui.Windows
 
             Dispatcher.UIThread.InvokeAsync(() =>
             {
-                if (MainContent.Content != _mainViewContent)
-                {
-                    MainContent.Content = _mainViewContent;
-                }
-
                 ViewModel.ShowMenuAndStatusBar = true;
                 ViewModel.ShowContent = true;
                 ViewModel.ShowLoadProgress = false;
                 ViewModel.IsLoadingIndeterminate = false;
                 Cursor = Cursor.Default;
+
+                if (MainContent.Content != _mainViewContent)
+                {
+                    MainContent.Content = _mainViewContent;
+                }
 
                 AppHost = null;
 
@@ -424,7 +443,7 @@ namespace Ryujinx.Ava.Ui.Windows
             // Consider removing this at some point in the future when we don't need to worry about old saves.
             VirtualFileSystem.FixExtraData(LibHacHorizonManager.RyujinxClient);
 
-            AccountManager = new AccountManager(LibHacHorizonManager.RyujinxClient, Program.CommandLineProfile);
+            AccountManager = new AccountManager(LibHacHorizonManager.RyujinxClient, CommandLineState.Profile);
 
             VirtualFileSystem.ReloadKeySet();
 
@@ -509,22 +528,20 @@ namespace Ryujinx.Ava.Ui.Windows
 
         public static void UpdateGraphicsConfig()
         {
-            int resScale = ConfigurationState.Instance.Graphics.ResScale;
-            float resScaleCustom = ConfigurationState.Instance.Graphics.ResScaleCustom;
-
-            GraphicsConfig.ResScale = resScale == -1 ? resScaleCustom : resScale;
-            GraphicsConfig.MaxAnisotropy = ConfigurationState.Instance.Graphics.MaxAnisotropy;
-            GraphicsConfig.ShadersDumpPath = ConfigurationState.Instance.Graphics.ShadersDumpPath;
-            GraphicsConfig.EnableShaderCache = ConfigurationState.Instance.Graphics.EnableShaderCache;
+            GraphicsConfig.ResScale                   = ConfigurationState.Instance.Graphics.ResScale == -1 ? ConfigurationState.Instance.Graphics.ResScaleCustom : ConfigurationState.Instance.Graphics.ResScale;
+            GraphicsConfig.MaxAnisotropy              = ConfigurationState.Instance.Graphics.MaxAnisotropy;
+            GraphicsConfig.ShadersDumpPath            = ConfigurationState.Instance.Graphics.ShadersDumpPath;
+            GraphicsConfig.EnableShaderCache          = ConfigurationState.Instance.Graphics.EnableShaderCache;
             GraphicsConfig.EnableTextureRecompression = ConfigurationState.Instance.Graphics.EnableTextureRecompression;
+            GraphicsConfig.EnableMacroHLE             = ConfigurationState.Instance.Graphics.EnableMacroHLE;
         }
 
         public void LoadHotKeys()
         {
-            HotKeyManager.SetHotKey(FullscreenHotKey, new KeyGesture(Key.Enter, KeyModifiers.Alt));
+            HotKeyManager.SetHotKey(FullscreenHotKey,  new KeyGesture(Key.Enter, KeyModifiers.Alt));
             HotKeyManager.SetHotKey(FullscreenHotKey2, new KeyGesture(Key.F11));
-            HotKeyManager.SetHotKey(DockToggleHotKey, new KeyGesture(Key.F9));
-            HotKeyManager.SetHotKey(ExitHotKey, new KeyGesture(Key.Escape));
+            HotKeyManager.SetHotKey(DockToggleHotKey,  new KeyGesture(Key.F9));
+            HotKeyManager.SetHotKey(ExitHotKey,        new KeyGesture(Key.Escape));
         }
 
         public static void SaveConfig()
@@ -536,10 +553,12 @@ namespace Ryujinx.Ava.Ui.Windows
         {
             ApplicationLibrary.LoadAndSaveMetaData(titleId, appMetadata =>
             {
-                DateTime lastPlayedDateTime = DateTime.Parse(appMetadata.LastPlayed);
-                double sessionTimePlayed = DateTime.UtcNow.Subtract(lastPlayedDateTime).TotalSeconds;
+                if (DateTime.TryParse(appMetadata.LastPlayed, out DateTime lastPlayedDateTime))
+                {
+                    double sessionTimePlayed = DateTime.UtcNow.Subtract(lastPlayedDateTime).TotalSeconds;
 
-                appMetadata.TimePlayed += Math.Round(sessionTimePlayed, MidpointRounding.AwayFromZero);
+                    appMetadata.TimePlayed += Math.Round(sessionTimePlayed, MidpointRounding.AwayFromZero);
+                }
             });
         }
 
@@ -656,7 +675,12 @@ namespace Ryujinx.Ava.Ui.Windows
                 {
                     AppHost = null;
 
-                    Dispatcher.UIThread.Post(Close);
+                    Dispatcher.UIThread.Post(() =>
+                    {
+                        MainContent = null;
+
+                        Close();
+                    });
                 };
                 AppHost?.Stop();
 

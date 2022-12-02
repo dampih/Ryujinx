@@ -7,7 +7,6 @@ using Ryujinx.Audio.Renderer.Server.Performance;
 using Ryujinx.Audio.Renderer.Server.Sink;
 using Ryujinx.Audio.Renderer.Server.Upsampler;
 using Ryujinx.Audio.Renderer.Server.Voice;
-using Ryujinx.Common.Memory;
 using System;
 using CpuAddress = System.UInt64;
 
@@ -26,7 +25,7 @@ namespace Ryujinx.Audio.Renderer.Server
         /// <summary>
         /// The estimated total processing time.
         /// </summary>
-        public ulong EstimatedProcessingTime { get; set; }
+        public uint EstimatedProcessingTime { get; set; }
 
         /// <summary>
         /// The command list that is populated by the <see cref="CommandBuffer"/>.

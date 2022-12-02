@@ -1,5 +1,4 @@
 using Ryujinx.Common.Configuration;
-using Ryujinx.Graphics.Shader;
 using System;
 
 namespace Ryujinx.Graphics.GAL
@@ -16,7 +15,12 @@ namespace Ryujinx.Graphics.GAL
 
         void BackgroundContextAction(Action action, bool alwaysBackground = false);
 
-        BufferHandle CreateBuffer(int size);
+        BufferHandle CreateBuffer(int size, BufferHandle storageHint);
+
+        BufferHandle CreateBuffer(int size)
+        {
+            return CreateBuffer(size, BufferHandle.Null);
+        }
 
         IProgram CreateProgram(ShaderSource[] shaders, ShaderInfo info);
 
@@ -27,9 +31,10 @@ namespace Ryujinx.Graphics.GAL
 
         void DeleteBuffer(BufferHandle buffer);
 
-        ReadOnlySpan<byte> GetBufferData(BufferHandle buffer, int offset, int size);
+        PinnedSpan<byte> GetBufferData(BufferHandle buffer, int offset, int size);
 
         Capabilities GetCapabilities();
+        ulong GetCurrentSync();
         HardwareInfo GetHardwareInfo();
 
         IProgram LoadProgramBinary(byte[] programBinary, bool hasFragmentShader, ShaderInfo info);

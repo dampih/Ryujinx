@@ -24,7 +24,6 @@ using System.Buffers;
 using System.IO;
 using System.Threading;
 using System.Threading.Tasks;
-using static LibHac.Fs.ApplicationSaveDataManagement;
 using Path = System.IO.Path;
 
 namespace Ryujinx.Ava.Common
@@ -114,6 +113,11 @@ namespace Ryujinx.Ava.Common
                 return;
             }
 
+            OpenSaveDir(saveDataId);
+        }
+
+        public static void OpenSaveDir(ulong saveDataId)
+        {
             string saveRootPath = Path.Combine(_virtualFileSystem.GetNandPath(), $"user/save/{saveDataId:x16}");
 
             if (!Directory.Exists(saveRootPath))

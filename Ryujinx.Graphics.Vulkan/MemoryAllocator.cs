@@ -33,7 +33,7 @@ namespace Ryujinx.Graphics.Vulkan
                 return default;
             }
 
-            bool map = flags.HasFlag(MemoryPropertyFlags.MemoryPropertyHostVisibleBit);
+            bool map = flags.HasFlag(MemoryPropertyFlags.HostVisibleBit);
             return Allocate(memoryTypeIndex, requirements.Size, requirements.Alignment, map);
         }
 
@@ -71,6 +71,23 @@ namespace Ryujinx.Graphics.Vulkan
             }
 
             return -1;
+        }
+
+        public static bool IsDeviceMemoryShared(Vk api, PhysicalDevice physicalDevice)
+        {
+            // The device is regarded as having shared memory if all heaps have the device local bit.
+
+            api.GetPhysicalDeviceMemoryProperties(physicalDevice, out var properties);
+
+            for (int i = 0; i < properties.MemoryHeapCount; i++)
+            {
+                if (!properties.MemoryHeaps[i].Flags.HasFlag(MemoryHeapFlags.MemoryHeapDeviceLocalBit))
+                {
+                    return false;
+                }
+            }
+
+            return true;
         }
 
         public void Dispose()

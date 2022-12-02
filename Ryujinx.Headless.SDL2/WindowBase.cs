@@ -157,7 +157,7 @@ namespace Ryujinx.Headless.SDL2
 
         protected abstract void FinalizeWindowRenderer();
 
-        protected abstract void SwapBuffers(object image);
+        protected abstract void SwapBuffers();
 
         public abstract SDL_WindowFlags GetWindowFlags();
 
@@ -168,14 +168,6 @@ namespace Ryujinx.Headless.SDL2
 
         public void Render()
         {
-            InitializeWindowRenderer();
-
-            Device.Gpu.Renderer.Initialize(_glLogLevel);
-
-            InitializeRenderer();
-
-            _gpuVendorName = GetGpuVendorName();
-
             Device.Gpu.Renderer.RunLoop(() =>
             {
                 Device.Gpu.SetGpuThread();
@@ -202,7 +194,7 @@ namespace Ryujinx.Headless.SDL2
 
                     while (Device.ConsumeFrameAvailable())
                     {
-                        Device.PresentFrame((texture) => { SwapBuffers(texture); });
+                        Device.PresentFrame(SwapBuffers);
                     }
 
                     if (_ticks >= _ticksPerFrame)
@@ -322,6 +314,14 @@ namespace Ryujinx.Headless.SDL2
             _isActive = true;
 
             InitializeWindow();
+
+            InitializeWindowRenderer();
+
+            Device.Gpu.Renderer.Initialize(_glLogLevel);
+
+            InitializeRenderer();
+
+            _gpuVendorName = GetGpuVendorName();
 
             Thread renderLoopThread = new Thread(Render)
             {

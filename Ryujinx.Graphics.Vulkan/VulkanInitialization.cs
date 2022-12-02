@@ -1,4 +1,4 @@
-﻿using Ryujinx.Common.Configuration;
+using Ryujinx.Common.Configuration;
 using Ryujinx.Common.Logging;
 using Ryujinx.Graphics.GAL;
 using Silk.NET.Vulkan;
@@ -28,6 +28,7 @@ namespace Ryujinx.Graphics.Vulkan
             "VK_EXT_fragment_shader_interlock",
             "VK_EXT_index_type_uint8",
             "VK_EXT_robustness2",
+            "VK_KHR_shader_float16_int8",
             "VK_EXT_shader_subgroup_ballot",
             "VK_EXT_subgroup_size_control",
             "VK_NV_geometry_shader_passthrough"
@@ -36,7 +37,6 @@ namespace Ryujinx.Graphics.Vulkan
         public static string[] RequiredExtensions { get; } = new string[]
         {
             KhrSwapchain.ExtensionName,
-            "VK_EXT_shader_subgroup_vote",
             ExtTransformFeedback.ExtensionName
         };
 
@@ -52,7 +52,7 @@ namespace Ryujinx.Graphics.Vulkan
             "VUID-VkSubpassDependency-srcSubpass-00867"
         };
 
-        internal static Instance CreateInstance(Vk api, GraphicsDebugLevel logLevel, string[] requiredExtensions, out ExtDebugReport debugReport, out DebugReportCallbackEXT debugReportCallback)
+        internal static Instance CreateInstance(Vk api, GraphicsDebugLevel logLevel, string[] requiredExtensions, out ExtDebugUtils debugUtils, out DebugUtilsMessengerEXT debugUtilsMessenger)
         {
             var enabledLayers = new List<string>();
 
@@ -88,7 +88,7 @@ namespace Ryujinx.Graphics.Vulkan
                 AddAvailableLayer("VK_LAYER_KHRONOS_validation");
             }
 
-            var enabledExtensions = requiredExtensions.Append(ExtDebugReport.ExtensionName).ToArray();
+            var enabledExtensions = requiredExtensions.Append(ExtDebugUtils.ExtensionName).ToArray();
 
             var appName = Marshal.StringToHGlobalAnsi(AppName);
 
@@ -138,22 +138,18 @@ namespace Ryujinx.Graphics.Vulkan
                 Marshal.FreeHGlobal(ppEnabledLayers[i]);
             }
 
-            CreateDebugCallbacks(api, logLevel, instance, out debugReport, out debugReportCallback);
+            CreateDebugMessenger(api, logLevel, instance, out debugUtils, out debugUtilsMessenger);
 
             return instance;
         }
 
-        private unsafe static uint DebugReport(
-            uint flags,
-            DebugReportObjectTypeEXT objectType,
-            ulong @object,
-            nuint location,
-            int messageCode,
-            byte* layerPrefix,
-            byte* message,
-            void* userData)
+        private unsafe static uint DebugMessenger(
+            DebugUtilsMessageSeverityFlagsEXT messageSeverity,
+            DebugUtilsMessageTypeFlagsEXT messageTypes,
+            DebugUtilsMessengerCallbackDataEXT* pCallbackData,
+            void* pUserData)
         {
-            var msg = Marshal.PtrToStringAnsi((IntPtr)message);
+            var msg = Marshal.PtrToStringAnsi((IntPtr)pCallbackData->PMessage);
 
             foreach (string excludedMessagePart in _excludedMessages)
             {
@@ -163,26 +159,20 @@ namespace Ryujinx.Graphics.Vulkan
                 }
             }
 
-            DebugReportFlagsEXT debugFlags = (DebugReportFlagsEXT)flags;
-
-            if (debugFlags.HasFlag(DebugReportFlagsEXT.DebugReportErrorBitExt))
+            if (messageSeverity.HasFlag(DebugUtilsMessageSeverityFlagsEXT.ErrorBitExt))
             {
                 Logger.Error?.Print(LogClass.Gpu, msg);
                 //throw new Exception(msg);
             }
-            else if (debugFlags.HasFlag(DebugReportFlagsEXT.DebugReportWarningBitExt))
+            else if (messageSeverity.HasFlag(DebugUtilsMessageSeverityFlagsEXT.WarningBitExt))
             {
                 Logger.Warning?.Print(LogClass.Gpu, msg);
             }
-            else if (debugFlags.HasFlag(DebugReportFlagsEXT.DebugReportInformationBitExt))
+            else if (messageSeverity.HasFlag(DebugUtilsMessageSeverityFlagsEXT.InfoBitExt))
             {
                 Logger.Info?.Print(LogClass.Gpu, msg);
             }
-            else if (debugFlags.HasFlag(DebugReportFlagsEXT.DebugReportPerformanceWarningBitExt))
-            {
-                Logger.Warning?.Print(LogClass.Gpu, msg);
-            }
-            else
+            else // if (messageSeverity.HasFlag(DebugUtilsMessageSeverityFlagsEXT.VerboseBitExt))
             {
                 Logger.Debug?.Print(LogClass.Gpu, msg);
             }
@@ -327,7 +317,7 @@ namespace Ryujinx.Graphics.Vulkan
 
         internal static uint FindSuitableQueueFamily(Vk api, PhysicalDevice physicalDevice, SurfaceKHR surface, out uint queueCount)
         {
-            const QueueFlags RequiredFlags = QueueFlags.QueueGraphicsBit | QueueFlags.QueueComputeBit;
+            const QueueFlags RequiredFlags = QueueFlags.GraphicsBit | QueueFlags.ComputeBit;
 
             var khrSurface = new KhrSurface(api.Context);
 
@@ -402,6 +392,7 @@ namespace Ryujinx.Graphics.Vulkan
                 ShaderClipDistance = true,
                 ShaderFloat64 = supportedFeatures.ShaderFloat64,
                 ShaderImageGatherExtended = true,
+                ShaderStorageImageMultisample = supportedFeatures.ShaderStorageImageMultisample,
                 // ShaderStorageImageReadWithoutFormat = true,
                 // ShaderStorageImageWriteWithoutFormat = true,
                 TessellationShader = true,
@@ -452,7 +443,8 @@ namespace Ryujinx.Graphics.Vulkan
                 SType = StructureType.PhysicalDeviceVulkan12Features,
                 PNext = pExtendedFeatures,
                 DescriptorIndexing = supportedExtensions.Contains("VK_EXT_descriptor_indexing"),
-                DrawIndirectCount = supportedExtensions.Contains(KhrDrawIndirectCount.ExtensionName)
+                DrawIndirectCount = supportedExtensions.Contains(KhrDrawIndirectCount.ExtensionName),
+                UniformBufferStandardLayout = supportedExtensions.Contains("VK_KHR_uniform_buffer_standard_layout")
             };
 
             pExtendedFeatures = &featuresVk12;
@@ -550,46 +542,59 @@ namespace Ryujinx.Graphics.Vulkan
             return new CommandBufferPool(api, device, queue, queueLock, queueFamilyIndex);
         }
 
-        internal unsafe static void CreateDebugCallbacks(
+        internal unsafe static void CreateDebugMessenger(
             Vk api,
             GraphicsDebugLevel logLevel,
             Instance instance,
-            out ExtDebugReport debugReport,
-            out DebugReportCallbackEXT debugReportCallback)
+            out ExtDebugUtils debugUtils,
+            out DebugUtilsMessengerEXT debugUtilsMessenger)
         {
-            debugReport = default;
+            debugUtils = default;
 
             if (logLevel != GraphicsDebugLevel.None)
             {
-                if (!api.TryGetInstanceExtension(instance, out debugReport))
+                if (!api.TryGetInstanceExtension(instance, out debugUtils))
                 {
-                    debugReportCallback = default;
+                    debugUtilsMessenger = default;
                     return;
                 }
 
-                var flags = logLevel switch
+                var filterLogType = logLevel switch
                 {
-                    GraphicsDebugLevel.Error => DebugReportFlagsEXT.DebugReportErrorBitExt,
-                    GraphicsDebugLevel.Slowdowns => DebugReportFlagsEXT.DebugReportErrorBitExt | DebugReportFlagsEXT.DebugReportPerformanceWarningBitExt,
-                    GraphicsDebugLevel.All => DebugReportFlagsEXT.DebugReportInformationBitExt |
-                                              DebugReportFlagsEXT.DebugReportWarningBitExt |
-                                              DebugReportFlagsEXT.DebugReportPerformanceWarningBitExt |
-                                              DebugReportFlagsEXT.DebugReportErrorBitExt |
-                                              DebugReportFlagsEXT.DebugReportDebugBitExt,
+                    GraphicsDebugLevel.Error => DebugUtilsMessageTypeFlagsEXT.ValidationBitExt,
+                    GraphicsDebugLevel.Slowdowns => DebugUtilsMessageTypeFlagsEXT.ValidationBitExt |
+                                                    DebugUtilsMessageTypeFlagsEXT.PerformanceBitExt,
+                    GraphicsDebugLevel.All => DebugUtilsMessageTypeFlagsEXT.GeneralBitExt |
+                                              DebugUtilsMessageTypeFlagsEXT.ValidationBitExt |
+                                              DebugUtilsMessageTypeFlagsEXT.PerformanceBitExt,
                     _ => throw new ArgumentException($"Invalid log level \"{logLevel}\".")
                 };
-                var debugReportCallbackCreateInfo = new DebugReportCallbackCreateInfoEXT()
+
+                var filterLogSeverity = logLevel switch
                 {
-                    SType = StructureType.DebugReportCallbackCreateInfoExt,
-                    Flags = flags,
-                    PfnCallback = new PfnDebugReportCallbackEXT(DebugReport)
+                    GraphicsDebugLevel.Error => DebugUtilsMessageSeverityFlagsEXT.ErrorBitExt,
+                    GraphicsDebugLevel.Slowdowns => DebugUtilsMessageSeverityFlagsEXT.ErrorBitExt |
+                                                    DebugUtilsMessageSeverityFlagsEXT.WarningBitExt,
+                    GraphicsDebugLevel.All => DebugUtilsMessageSeverityFlagsEXT.InfoBitExt |
+                                              DebugUtilsMessageSeverityFlagsEXT.WarningBitExt |
+                                              DebugUtilsMessageSeverityFlagsEXT.VerboseBitExt |
+                                              DebugUtilsMessageSeverityFlagsEXT.ErrorBitExt,
+                    _ => throw new ArgumentException($"Invalid log level \"{logLevel}\".")
                 };
 
-                debugReport.CreateDebugReportCallback(instance, in debugReportCallbackCreateInfo, null, out debugReportCallback).ThrowOnError();
+                var debugUtilsMessengerCreateInfo = new DebugUtilsMessengerCreateInfoEXT()
+                {
+                    SType = StructureType.DebugUtilsMessengerCreateInfoExt,
+                    MessageType = filterLogType,
+                    MessageSeverity = filterLogSeverity,
+                    PfnUserCallback = new PfnDebugUtilsMessengerCallbackEXT(DebugMessenger)
+                };
+
+                debugUtils.CreateDebugUtilsMessenger(instance, in debugUtilsMessengerCreateInfo, null, out debugUtilsMessenger).ThrowOnError();
             }
             else
             {
-                debugReportCallback = default;
+                debugUtilsMessenger = default;
             }
         }
     }

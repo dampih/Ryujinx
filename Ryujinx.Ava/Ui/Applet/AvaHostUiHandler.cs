@@ -10,7 +10,6 @@ using Ryujinx.HLE.HOS.Services.Am.AppletOE.ApplicationProxyService.ApplicationPr
 using Ryujinx.HLE.Ui;
 using System;
 using System.Threading;
-using System.Threading.Tasks;
 
 namespace Ryujinx.Ava.Ui.Applet
 {
@@ -58,14 +57,14 @@ namespace Ryujinx.Ava.Ui.Applet
 
                     bool opened = false;
 
-                    UserResult response = await ContentDialogHelper.ShowDeferredContentDialog(_parent, 
-                       title, 
-                       message, 
-                       "", 
-                       LocaleManager.Instance["DialogOpenSettingsWindowLabel"], 
-                       "", 
-                       LocaleManager.Instance["SettingsButtonClose"], 
-                       (int)Symbol.Important, 
+                    UserResult response = await ContentDialogHelper.ShowDeferredContentDialog(_parent,
+                       title,
+                       message,
+                       "",
+                       LocaleManager.Instance["DialogOpenSettingsWindowLabel"],
+                       "",
+                       LocaleManager.Instance["SettingsButtonClose"],
+                       (int)Symbol.Important,
                        deferEvent,
                        async (window) =>
                        {
@@ -169,7 +168,7 @@ namespace Ryujinx.Ava.Ui.Applet
 
                     object response = await msgDialog.Run();
 
-                    if (response != null && buttons.Length > 1 && (int)response != buttons.Length - 1)
+                    if (response != null && buttons != null && buttons.Length > 1 && (int)response != buttons.Length - 1)
                     {
                         showDetails = true;
                     }

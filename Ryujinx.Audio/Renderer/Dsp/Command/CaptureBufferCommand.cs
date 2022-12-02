@@ -1,5 +1,4 @@
 using Ryujinx.Audio.Renderer.Dsp.State;
-using Ryujinx.Audio.Renderer.Parameter;
 using Ryujinx.Memory;
 using System;
 using System.Runtime.CompilerServices;
@@ -17,7 +16,7 @@ namespace Ryujinx.Audio.Renderer.Dsp.Command
 
         public CommandType CommandType => CommandType.CaptureBuffer;
 
-        public ulong EstimatedProcessingTime { get; set; }
+        public uint EstimatedProcessingTime { get; set; }
 
         public uint InputBufferIndex { get; }
 
