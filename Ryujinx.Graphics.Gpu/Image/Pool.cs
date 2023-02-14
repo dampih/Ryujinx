@@ -22,6 +22,8 @@ namespace Ryujinx.Graphics.Gpu.Image
         protected T1[] Items;
         protected T2[] DescriptorCache;
 
+        protected readonly BitMap ModifiedEntries;
+
         /// <summary>
         /// The maximum ID value of resources on the pool (inclusive).
         /// </summary>
@@ -61,6 +63,8 @@ namespace Ryujinx.Graphics.Gpu.Image
 
             int count = maximumId + 1;
 
+            ModifiedEntries = new BitMap(count);
+
             ulong size = (ulong)(uint)count * DescriptorSize;
 
             Items = new T1[count];
@@ -69,7 +73,7 @@ namespace Ryujinx.Graphics.Gpu.Image
             Address = address;
             Size    = size;
 
-            _memoryTracking = physicalMemory.BeginGranularTracking(address, size);
+            _memoryTracking = physicalMemory.BeginGranularTracking(address, size, ResourceKind.Pool);
             _memoryTracking.RegisterPreciseAction(address, size, PreciseAction);
             _modifiedDelegate = RegionModified;
         }
@@ -91,7 +95,17 @@ namespace Ryujinx.Graphics.Gpu.Image
         /// <returns>A reference to the descriptor</returns>
         public ref readonly T2 GetDescriptorRef(int id)
         {
-            return ref MemoryMarshal.Cast<byte, T2>(PhysicalMemory.GetSpan(Address + (ulong)id * DescriptorSize, DescriptorSize))[0];
+            return ref GetDescriptorRefAddress(Address + (ulong)id * DescriptorSize);
+        }
+
+        /// <summary>
+        /// Gets a reference to the descriptor for a given address.
+        /// </summary>
+        /// <param name="address">Address of the descriptor</param>
+        /// <returns>A reference to the descriptor</returns>
+        public ref readonly T2 GetDescriptorRefAddress(ulong address)
+        {
+            return ref MemoryMarshal.Cast<byte, T2>(PhysicalMemory.GetSpan(address, DescriptorSize))[0];
         }
 
         /// <summary>

@@ -1,9 +1,8 @@
 ﻿using Ryujinx.Graphics.GAL.Multithreading.Model;
-using Ryujinx.Graphics.Shader;
 
 namespace Ryujinx.Graphics.GAL.Multithreading.Commands
 {
-    struct UpdateRenderScaleCommand : IGALCommand
+    struct UpdateRenderScaleCommand : IGALCommand, IGALCommand<UpdateRenderScaleCommand>
     {
         public CommandType CommandType => CommandType.UpdateRenderScale;
         private SpanRef<float> _scales;

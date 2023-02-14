@@ -18,7 +18,6 @@ namespace Ryujinx.Graphics.Vulkan.Queries
         private readonly PipelineFull _pipeline;
 
         private QueryPool _queryPool;
-        private bool _isReset;
 
         private readonly BufferHolder _buffer;
         private readonly IntPtr _bufferMap;
@@ -27,6 +26,7 @@ namespace Ryujinx.Graphics.Vulkan.Queries
         private bool _isSupported;
 
         private long _defaultValue;
+        private int? _resetSequence;
 
         public unsafe BufferedQuery(VulkanRenderer gd, Device device, PipelineFull pipeline, CounterType type, bool result32Bit)
         {
@@ -41,7 +41,7 @@ namespace Ryujinx.Graphics.Vulkan.Queries
             if (_isSupported)
             {
                 QueryPipelineStatisticFlags flags = type == CounterType.PrimitivesGenerated ?
-                    QueryPipelineStatisticFlags.QueryPipelineStatisticGeometryShaderPrimitivesBit : 0;
+                    QueryPipelineStatisticFlags.GeometryShaderPrimitivesBit : 0;
 
                 var queryPoolCreateInfo = new QueryPoolCreateInfo()
                 {
@@ -67,8 +67,8 @@ namespace Ryujinx.Graphics.Vulkan.Queries
             return type switch
             {
                 CounterType.SamplesPassed => true,
+                CounterType.PrimitivesGenerated => gd.Capabilities.SupportsPipelineStatisticsQuery,
                 CounterType.TransformFeedbackPrimitivesWritten => gd.Capabilities.SupportsTransformFeedbackQueries,
-                CounterType.PrimitivesGenerated => gd.Capabilities.SupportsGeometryShader,
                 _ => false
             };
         }
@@ -92,16 +92,18 @@ namespace Ryujinx.Graphics.Vulkan.Queries
         public void Reset()
         {
             End(false);
-            Begin();
+            Begin(null);
         }
 
-        public void Begin()
+        public void Begin(int? resetSequence)
         {
             if (_isSupported)
             {
-                _pipeline.BeginQuery(this, _queryPool, !_isReset);
+                bool needsReset = resetSequence == null || _resetSequence == null || resetSequence.Value != _resetSequence.Value;
+                bool isOcclusion = _type == CounterType.SamplesPassed;
+                _pipeline.BeginQuery(this, _queryPool, needsReset, isOcclusion, isOcclusion && resetSequence != null);
             }
-            _isReset = false;
+            _resetSequence = null;
         }
 
         public unsafe void End(bool withResult)
@@ -162,24 +164,25 @@ namespace Ryujinx.Graphics.Vulkan.Queries
             return data;
         }
 
-        public void PoolReset(CommandBuffer cmd)
+        public void PoolReset(CommandBuffer cmd, int resetSequence)
         {
             if (_isSupported)
             {
                 _api.CmdResetQueryPool(cmd, _queryPool, 0, 1);
             }
-            _isReset = true;
+
+            _resetSequence = resetSequence;
         }
 
         public void PoolCopy(CommandBufferScoped cbs)
         {
             var buffer = _buffer.GetBuffer(cbs.CommandBuffer, true).Get(cbs, 0, sizeof(long)).Value;
 
-            QueryResultFlags flags = QueryResultFlags.QueryResultWaitBit;
+            QueryResultFlags flags = QueryResultFlags.ResultWaitBit;
 
             if (!_result32Bit)
             {
-                flags |= QueryResultFlags.QueryResult64Bit;
+                flags |= QueryResultFlags.Result64Bit;
             }
 
             _api.CmdCopyQueryPoolResults(

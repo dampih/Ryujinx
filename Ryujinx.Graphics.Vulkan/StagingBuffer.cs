@@ -14,7 +14,7 @@ namespace Ryujinx.Graphics.Vulkan
         private readonly VulkanRenderer _gd;
         private readonly BufferHolder _buffer;
 
-        private struct PendingCopy
+        private readonly struct PendingCopy
         {
             public FenceHolder Fence { get; }
             public int Size { get; }
@@ -87,7 +87,7 @@ namespace Ryujinx.Graphics.Vulkan
         private void PushDataImpl(CommandBufferScoped cbs, BufferHolder dst, int dstOffset, ReadOnlySpan<byte> data)
         {
             var srcBuffer = _buffer.GetBuffer();
-            var dstBuffer = dst.GetBuffer();
+            var dstBuffer = dst.GetBuffer(cbs.CommandBuffer, dstOffset, data.Length, true);
 
             int offset = _freeOffset;
             int capacity = BufferSize - offset;

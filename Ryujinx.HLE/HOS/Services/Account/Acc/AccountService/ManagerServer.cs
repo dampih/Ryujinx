@@ -51,11 +51,11 @@ namespace Ryujinx.HLE.HOS.Services.Account.Acc.AccountService
 
             var payload = new JwtPayload
             {
-                { "sub", BitConverter.ToString(rawUserId).Replace("-", "").ToLower() },
+                { "sub", Convert.ToHexString(rawUserId).ToLower() },
                 { "aud", "ed9e2f05d286f7b8" },
-                { "di", BitConverter.ToString(deviceId).Replace("-", "").ToLower() },
+                { "di", Convert.ToHexString(deviceId).ToLower() },
                 { "sn", "XAW10000000000" },
-                { "bs:did", BitConverter.ToString(deviceAccountId).Replace("-", "").ToLower() },
+                { "bs:did", Convert.ToHexString(deviceAccountId).ToLower() },
                 { "iss", "https://e0d67c509fb203858ebcb2fe3f88c2aa.baas.nintendo.com" },
                 { "typ", "id_token" },
                 { "iat", DateTimeOffset.UtcNow.ToUnixTimeSeconds() },
@@ -162,7 +162,24 @@ namespace Ryujinx.HLE.HOS.Services.Account.Acc.AccountService
 
         public ResultCode StoreOpenContext(ServiceCtx context)
         {
+            context.Device.System.AccountManager.StoreOpenedUsers();
+
+            return ResultCode.Success;
+        }
+
+        public ResultCode LoadNetworkServiceLicenseKindAsync(ServiceCtx context, out IAsyncNetworkServiceLicenseKindContext asyncContext)
+        {
+            KEvent asyncEvent = new KEvent(context.Device.System.KernelContext);
+            AsyncExecution asyncExecution = new AsyncExecution(asyncEvent);
+
             Logger.Stub?.PrintStub(LogClass.ServiceAcc);
+
+            // NOTE: This is an extension of the data retrieved from the id token cache.
+            asyncExecution.Initialize(1000, EnsureIdTokenCacheAsyncImpl);
+
+            asyncContext = new IAsyncNetworkServiceLicenseKindContext(asyncExecution, NetworkServiceLicenseKind.Subscribed);
+
+            // return ResultCode.NullObject if the IAsyncNetworkServiceLicenseKindContext pointer is null. Doesn't occur in our case.
 
             return ResultCode.Success;
         }

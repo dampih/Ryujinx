@@ -37,7 +37,7 @@ namespace Ryujinx.Graphics.Gpu.Shader.DiskCache
         /// <summary>
         /// Program validation entry.
         /// </summary>
-        private struct ProgramEntry
+        private readonly struct ProgramEntry
         {
             /// <summary>
             /// Cached shader program.
@@ -90,7 +90,7 @@ namespace Ryujinx.Graphics.Gpu.Shader.DiskCache
         /// <summary>
         /// Translated shader compilation entry.
         /// </summary>
-        private struct ProgramCompilation
+        private readonly struct ProgramCompilation
         {
             /// <summary>
             /// Translated shader stages.
@@ -143,7 +143,7 @@ namespace Ryujinx.Graphics.Gpu.Shader.DiskCache
         /// <summary>
         /// Program translation entry.
         /// </summary>
-        private struct AsyncProgramTranslation
+        private readonly struct AsyncProgramTranslation
         {
             /// <summary>
             /// Guest code for each active stage.
@@ -434,7 +434,10 @@ namespace Ryujinx.Graphics.Gpu.Shader.DiskCache
                     _needsHostRegen = true;
                 }
 
-                _programList.Add(entry.ProgramIndex, (entry.CachedProgram, entry.BinaryCode));
+                // Fetch the binary code from the backend if it isn't already present.
+                byte[] binaryCode = entry.BinaryCode ?? entry.CachedProgram.HostProgram.GetBinary();
+
+                _programList.Add(entry.ProgramIndex, (entry.CachedProgram, binaryCode));
                 SignalCompiled();
             }
             else if (entry.IsBinary)
@@ -502,7 +505,8 @@ namespace Ryujinx.Graphics.Gpu.Shader.DiskCache
                 IProgram hostProgram = _context.Renderer.CreateProgram(shaderSources, shaderInfo);
                 CachedShaderProgram program = new CachedShaderProgram(hostProgram, compilation.SpecializationState, compilation.Shaders);
 
-                byte[] binaryCode = _context.Capabilities.Api == TargetApi.Vulkan ? ShaderBinarySerializer.Pack(shaderSources) : hostProgram.GetBinary();
+                // Vulkan's binary code is the SPIR-V used for compilation, so it is ready immediately. Other APIs get this after compilation.
+                byte[] binaryCode = _context.Capabilities.Api == TargetApi.Vulkan ? ShaderBinarySerializer.Pack(shaderSources) : null;
 
                 EnqueueForValidation(new ProgramEntry(program, binaryCode, compilation.ProgramIndex, compilation.IsCompute, isBinary: false));
             }
@@ -569,9 +573,9 @@ namespace Ryujinx.Graphics.Gpu.Shader.DiskCache
                     RecompileGraphicsFromGuestCode(guestShaders, specState, programIndex);
                 }
             }
-            catch (DiskCacheLoadException diskCacheLoadException)
+            catch (Exception exception)
             {
-                Logger.Error?.Print(LogClass.Gpu, $"Error translating guest shader. {diskCacheLoadException.Message}");
+                Logger.Error?.Print(LogClass.Gpu, $"Error translating guest shader. {exception.Message}");
 
                 ErrorCount++;
                 SignalCompiled();
@@ -632,6 +636,8 @@ namespace Ryujinx.Graphics.Gpu.Shader.DiskCache
             CachedShaderStage[] shaders = new CachedShaderStage[guestShaders.Length];
             List<ShaderProgram> translatedStages = new List<ShaderProgram>();
 
+            TranslatorContext previousStage = null;
+
             for (int stageIndex = 0; stageIndex < Constants.ShaderStages; stageIndex++)
             {
                 TranslatorContext currentStage = translatorContexts[stageIndex + 1];
@@ -664,6 +670,16 @@ namespace Ryujinx.Graphics.Gpu.Shader.DiskCache
                     {
                         translatedStages.Add(program);
                     }
+
+                    previousStage = currentStage;
+                }
+                else if (
+                    previousStage != null &&
+                    previousStage.LayerOutputWritten &&
+                    stageIndex == 3 &&
+                    !_context.Capabilities.SupportsLayerVertexTessellation)
+                {
+                    translatedStages.Add(previousStage.GenerateGeometryPassthrough());
                 }
             }
 

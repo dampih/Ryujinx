@@ -301,6 +301,11 @@ namespace Ryujinx.Ui.Common.Configuration
             /// </summary>
             public ReactiveObject<bool> IgnoreMissingServices { get; private set; }
 
+            /// <summary>
+            /// Uses Hypervisor over JIT if available
+            /// </summary>
+            public ReactiveObject<bool> UseHypervisor { get; private set; }
+
             public SystemSection()
             {
                 Language                      = new ReactiveObject<Language>();
@@ -327,6 +332,8 @@ namespace Ryujinx.Ui.Common.Configuration
                 IgnoreMissingServices.Event   += static (sender, e) => LogValueChange(sender, e, nameof(IgnoreMissingServices));
                 AudioVolume                   = new ReactiveObject<float>();
                 AudioVolume.Event             += static (sender, e) => LogValueChange(sender, e, nameof(AudioVolume));
+                UseHypervisor                 = new ReactiveObject<bool>();
+                UseHypervisor.Event           += static (sender, e) => LogValueChange(sender, e, nameof(UseHypervisor));
             }
         }
 
@@ -417,9 +424,29 @@ namespace Ryujinx.Ui.Common.Configuration
             public ReactiveObject<bool> EnableTextureRecompression { get; private set; }
 
             /// <summary>
+            /// Enables or disables Macro high-level emulation
+            /// </summary>
+            public ReactiveObject<bool> EnableMacroHLE { get; private set; }
+
+            /// <summary>
             /// Graphics backend
             /// </summary>
             public ReactiveObject<GraphicsBackend> GraphicsBackend { get; private set; }
+
+            /// <summary>
+            /// Applies anti-aliasing to the renderer.
+            /// </summary>
+            public ReactiveObject<AntiAliasing> AntiAliasing { get; private set; }
+
+            /// <summary>
+            /// Sets the framebuffer upscaling type.
+            /// </summary>
+            public ReactiveObject<UpscaleType> UpscaleType { get; private set; }
+
+            /// <summary>
+            /// Sets the framebuffer upscaling level.
+            /// </summary>
+            public ReactiveObject<float> UpscaleLevel { get; private set; }
 
             /// <summary>
             /// Preferred GPU
@@ -449,6 +476,14 @@ namespace Ryujinx.Ui.Common.Configuration
                 GraphicsBackend.Event            += static (sender, e) => LogValueChange(sender, e, nameof(GraphicsBackend));
                 PreferredGpu                     = new ReactiveObject<string>();
                 PreferredGpu.Event               += static (sender, e) => LogValueChange(sender, e, nameof(PreferredGpu));
+                EnableMacroHLE                   = new ReactiveObject<bool>();
+                EnableMacroHLE.Event             += static (sender, e) => LogValueChange(sender, e, nameof(EnableMacroHLE));
+                AntiAliasing                     = new ReactiveObject<AntiAliasing>();
+                AntiAliasing.Event               += static (sender, e) => LogValueChange(sender, e, nameof(AntiAliasing));
+                UpscaleType                      = new ReactiveObject<UpscaleType>();
+                UpscaleType.Event                += static (sender, e) => LogValueChange(sender, e, nameof(UpscaleType));
+                UpscaleLevel                     = new ReactiveObject<float>();
+                UpscaleLevel.Event               += static (sender, e) => LogValueChange(sender, e, nameof(UpscaleLevel));
             }
         }
 
@@ -526,6 +561,9 @@ namespace Ryujinx.Ui.Common.Configuration
                 ResScaleCustom             = Graphics.ResScaleCustom,
                 MaxAnisotropy              = Graphics.MaxAnisotropy,
                 AspectRatio                = Graphics.AspectRatio,
+                AntiAliasing               = Graphics.AntiAliasing,
+                UpscaleType                = Graphics.UpscaleType,
+                UpscaleLevel               = Graphics.UpscaleLevel,
                 GraphicsShadersDumpPath    = Graphics.ShadersDumpPath,
                 LoggingEnableDebug         = Logger.EnableDebug,
                 LoggingEnableStub          = Logger.EnableStub,
@@ -549,6 +587,7 @@ namespace Ryujinx.Ui.Common.Configuration
                 EnableVsync                = Graphics.EnableVsync,
                 EnableShaderCache          = Graphics.EnableShaderCache,
                 EnableTextureRecompression = Graphics.EnableTextureRecompression,
+                EnableMacroHLE             = Graphics.EnableMacroHLE,
                 EnablePtc                  = System.EnablePtc,
                 EnableInternetAccess       = System.EnableInternetAccess,
                 EnableFsIntegrityChecks    = System.EnableFsIntegrityChecks,
@@ -558,6 +597,7 @@ namespace Ryujinx.Ui.Common.Configuration
                 MemoryManagerMode          = System.MemoryManagerMode,
                 ExpandRam                  = System.ExpandRam,
                 IgnoreMissingServices      = System.IgnoreMissingServices,
+                UseHypervisor              = System.UseHypervisor,
                 GuiColumns                 = new GuiColumns
                 {
                     FavColumn        = Ui.GuiColumns.FavColumn,
@@ -609,7 +649,7 @@ namespace Ryujinx.Ui.Common.Configuration
             Graphics.ResScaleCustom.Value             = 1.0f;
             Graphics.MaxAnisotropy.Value              = -1.0f;
             Graphics.AspectRatio.Value                = AspectRatio.Fixed16x9;
-            Graphics.GraphicsBackend.Value            = GraphicsBackend.OpenGl;
+            Graphics.GraphicsBackend.Value            = OperatingSystem.IsMacOS() ? GraphicsBackend.Vulkan : GraphicsBackend.OpenGl;
             Graphics.PreferredGpu.Value               = "";
             Graphics.ShadersDumpPath.Value            = "";
             Logger.EnableDebug.Value                  = false;
@@ -634,6 +674,10 @@ namespace Ryujinx.Ui.Common.Configuration
             Graphics.EnableVsync.Value                = true;
             Graphics.EnableShaderCache.Value          = true;
             Graphics.EnableTextureRecompression.Value = false;
+            Graphics.EnableMacroHLE.Value             = true;
+            Graphics.AntiAliasing.Value               = AntiAliasing.None;
+            Graphics.UpscaleType.Value                = UpscaleType.Bilinear;
+            Graphics.UpscaleLevel.Value               = 0.3f;
             System.EnablePtc.Value                    = true;
             System.EnableInternetAccess.Value         = false;
             System.EnableFsIntegrityChecks.Value      = true;
@@ -643,6 +687,7 @@ namespace Ryujinx.Ui.Common.Configuration
             System.MemoryManagerMode.Value            = MemoryManagerMode.HostMappedUnsafe;
             System.ExpandRam.Value                    = false;
             System.IgnoreMissingServices.Value        = false;
+            System.UseHypervisor.Value                = true;
             Ui.GuiColumns.FavColumn.Value             = true;
             Ui.GuiColumns.IconColumn.Value            = true;
             Ui.GuiColumns.AppColumn.Value             = true;
@@ -671,13 +716,15 @@ namespace Ryujinx.Ui.Common.Configuration
             Hid.EnableMouse.Value                     = false;
             Hid.Hotkeys.Value = new KeyboardHotkeys
             {
-                ToggleVsync = Key.Tab,
+                ToggleVsync = Key.F1,
                 ToggleMute = Key.F2,
                 Screenshot = Key.F8,
                 ShowUi = Key.F4,
                 Pause = Key.F5,
                 ResScaleUp = Key.Unbound,
-                ResScaleDown = Key.Unbound
+                ResScaleDown = Key.Unbound,
+                VolumeUp = Key.Unbound,
+                VolumeDown = Key.Unbound
             };
             Hid.InputConfig.Value = new List<InputConfig>
             {
@@ -807,7 +854,7 @@ namespace Ryujinx.Ui.Common.Configuration
 
                 configurationFileFormat.Hotkeys = new KeyboardHotkeys
                 {
-                    ToggleVsync = Key.Tab
+                    ToggleVsync = Key.F1
                 };
 
                 configurationFileUpdated = true;
@@ -988,7 +1035,7 @@ namespace Ryujinx.Ui.Common.Configuration
 
                 configurationFileFormat.Hotkeys = new KeyboardHotkeys
                 {
-                    ToggleVsync = Key.Tab,
+                    ToggleVsync = Key.F1,
                     Screenshot = Key.F8
                 };
 
@@ -1001,7 +1048,7 @@ namespace Ryujinx.Ui.Common.Configuration
 
                 configurationFileFormat.Hotkeys = new KeyboardHotkeys
                 {
-                    ToggleVsync = Key.Tab,
+                    ToggleVsync = Key.F1,
                     Screenshot = Key.F8,
                     ShowUi = Key.F4
                 };
@@ -1156,6 +1203,49 @@ namespace Ryujinx.Ui.Common.Configuration
                 configurationFileUpdated = true;
             }
 
+            if (configurationFileFormat.Version < 41)
+            {
+                Ryujinx.Common.Logging.Logger.Warning?.Print(LogClass.Application, $"Outdated configuration version {configurationFileFormat.Version}, migrating to version 41.");
+
+                configurationFileFormat.Hotkeys = new KeyboardHotkeys
+                {
+                    ToggleVsync = configurationFileFormat.Hotkeys.ToggleVsync,
+                    Screenshot = configurationFileFormat.Hotkeys.Screenshot,
+                    ShowUi = configurationFileFormat.Hotkeys.ShowUi,
+                    Pause = configurationFileFormat.Hotkeys.Pause,
+                    ToggleMute = configurationFileFormat.Hotkeys.ToggleMute,
+                    ResScaleUp = configurationFileFormat.Hotkeys.ResScaleUp,
+                    ResScaleDown = configurationFileFormat.Hotkeys.ResScaleDown,
+                    VolumeUp = Key.Unbound,
+                    VolumeDown = Key.Unbound
+                };
+            }
+
+            if (configurationFileFormat.Version < 42)
+            {
+                Ryujinx.Common.Logging.Logger.Warning?.Print(LogClass.Application, $"Outdated configuration version {configurationFileFormat.Version}, migrating to version 42.");
+
+                configurationFileFormat.EnableMacroHLE = true;
+            }
+
+            if (configurationFileFormat.Version < 43)
+            {
+                Ryujinx.Common.Logging.Logger.Warning?.Print(LogClass.Application, $"Outdated configuration version {configurationFileFormat.Version}, migrating to version 43.");
+
+                configurationFileFormat.UseHypervisor = true;
+            }
+
+            if (configurationFileFormat.Version < 44)
+            {
+                Ryujinx.Common.Logging.Logger.Warning?.Print(LogClass.Application, $"Outdated configuration version {configurationFileFormat.Version}, migrating to version 42.");
+
+                configurationFileFormat.AntiAliasing = AntiAliasing.None;
+                configurationFileFormat.UpscaleType = UpscaleType.Bilinear;
+                configurationFileFormat.UpscaleLevel = 0.3f;
+
+                configurationFileUpdated = true;
+            }
+
             Logger.EnableFileLog.Value                = configurationFileFormat.EnableFileLog;
             Graphics.ResScale.Value                   = configurationFileFormat.ResScale;
             Graphics.ResScaleCustom.Value             = configurationFileFormat.ResScaleCustom;
@@ -1165,6 +1255,9 @@ namespace Ryujinx.Ui.Common.Configuration
             Graphics.BackendThreading.Value           = configurationFileFormat.BackendThreading;
             Graphics.GraphicsBackend.Value            = configurationFileFormat.GraphicsBackend;
             Graphics.PreferredGpu.Value               = configurationFileFormat.PreferredGpu;
+            Graphics.AntiAliasing.Value               = configurationFileFormat.AntiAliasing;
+            Graphics.UpscaleType.Value                = configurationFileFormat.UpscaleType;
+            Graphics.UpscaleLevel.Value               = configurationFileFormat.UpscaleLevel;
             Logger.EnableDebug.Value                  = configurationFileFormat.LoggingEnableDebug;
             Logger.EnableStub.Value                   = configurationFileFormat.LoggingEnableStub;
             Logger.EnableInfo.Value                   = configurationFileFormat.LoggingEnableInfo;
@@ -1187,6 +1280,7 @@ namespace Ryujinx.Ui.Common.Configuration
             Graphics.EnableVsync.Value                = configurationFileFormat.EnableVsync;
             Graphics.EnableShaderCache.Value          = configurationFileFormat.EnableShaderCache;
             Graphics.EnableTextureRecompression.Value = configurationFileFormat.EnableTextureRecompression;
+            Graphics.EnableMacroHLE.Value             = configurationFileFormat.EnableMacroHLE;
             System.EnablePtc.Value                    = configurationFileFormat.EnablePtc;
             System.EnableInternetAccess.Value         = configurationFileFormat.EnableInternetAccess;
             System.EnableFsIntegrityChecks.Value      = configurationFileFormat.EnableFsIntegrityChecks;
@@ -1196,6 +1290,7 @@ namespace Ryujinx.Ui.Common.Configuration
             System.MemoryManagerMode.Value            = configurationFileFormat.MemoryManagerMode;
             System.ExpandRam.Value                    = configurationFileFormat.ExpandRam;
             System.IgnoreMissingServices.Value        = configurationFileFormat.IgnoreMissingServices;
+            System.UseHypervisor.Value                = configurationFileFormat.UseHypervisor;
             Ui.GuiColumns.FavColumn.Value             = configurationFileFormat.GuiColumns.FavColumn;
             Ui.GuiColumns.IconColumn.Value            = configurationFileFormat.GuiColumns.IconColumn;
             Ui.GuiColumns.AppColumn.Value             = configurationFileFormat.GuiColumns.AppColumn;

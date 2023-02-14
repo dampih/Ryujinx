@@ -1,6 +1,8 @@
 using Ryujinx.Common.Logging;
 using Ryujinx.Graphics.GAL;
+using Ryujinx.Graphics.Gpu.Memory;
 using Ryujinx.Graphics.Texture;
+using Ryujinx.Memory.Range;
 using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
@@ -8,13 +10,39 @@ using System.Collections.Generic;
 namespace Ryujinx.Graphics.Gpu.Image
 {
     /// <summary>
+    /// A request to dereference a texture from a pool.
+    /// </summary>
+    struct DereferenceRequest
+    {
+        public readonly bool IsUnmapped;
+        public readonly Texture Texture;
+        public readonly int ID;
+
+        public DereferenceRequest(Texture texture)
+        {
+            Texture = texture;
+            IsUnmapped = false;
+            ID = 0;
+        }
+
+        public DereferenceRequest(bool isUnmapped, Texture texture, int id)
+        {
+            IsUnmapped = isUnmapped;
+            Texture = texture;
+            ID = id;
+        }
+    }
+
+    /// <summary>
     /// Texture pool.
     /// </summary>
     class TexturePool : Pool<Texture, TextureDescriptor>, IPool<TexturePool>
     {
         private readonly GpuChannel _channel;
-        private readonly ConcurrentQueue<Texture> _dereferenceQueue = new ConcurrentQueue<Texture>();
+        private readonly ConcurrentQueue<DereferenceRequest> _dereferenceQueue = new ConcurrentQueue<DereferenceRequest>();
         private TextureDescriptor _defaultDescriptor;
+        private readonly List<(int, Texture)> _bindlessList = new List<(int, Texture)>();
+        private bool _bindlessDisable;
 
         /// <summary>
         /// Linked list node used on the texture pool cache.
@@ -52,16 +80,25 @@ namespace Ryujinx.Graphics.Gpu.Image
 
             if (texture == null)
             {
-                TextureInfo info = GetInfo(descriptor, out int layerSize);
+                texture = PhysicalMemory.TextureCache.FindShortCache(descriptor);
 
-                ProcessDereferenceQueue();
-
-                texture = PhysicalMemory.TextureCache.FindOrCreateTexture(_channel.MemoryManager, TextureSearchFlags.ForSampler, info, layerSize);
-
-                // If this happens, then the texture address is invalid, we can't add it to the cache.
                 if (texture == null)
                 {
-                    return ref descriptor;
+                    TextureInfo info = GetInfo(descriptor, out int layerSize);
+
+                    // The dereference queue can put our texture back on the cache.
+                    if ((texture = ProcessDereferenceQueue(id)) != null)
+                    {
+                        return ref descriptor;
+                    }
+
+                    texture = PhysicalMemory.TextureCache.FindOrCreateTexture(_channel.MemoryManager, TextureSearchFlags.ForSampler, info, layerSize);
+
+                    // If this happens, then the texture address is invalid, we can't add it to the cache.
+                    if (texture == null)
+                    {
+                        return ref descriptor;
+                    }
                 }
 
                 texture.IncrementReferenceCount(this, id);
@@ -72,22 +109,7 @@ namespace Ryujinx.Graphics.Gpu.Image
             }
             else
             {
-                if (texture.ChangedSize)
-                {
-                    // Texture changed size at one point - it may be a different size than the sampler expects.
-                    // This can be triggered when the size is changed by a size hint on copy or draw, but the texture has been sampled before.
-
-                    int baseLevel = descriptor.UnpackBaseLevel();
-                    int width = Math.Max(1, descriptor.UnpackWidth() >> baseLevel);
-                    int height = Math.Max(1, descriptor.UnpackHeight() >> baseLevel);
-
-                    if (texture.Info.Width != width || texture.Info.Height != height)
-                    {
-                        texture.ChangeSize(width, height, texture.Info.DepthOrLayers);
-                    }
-                }
-
-                // Memory is automatically synchronized on texture creation.
+                // On the path above (texture not yet in the pool), memory is automatically synchronized on texture creation.
                 texture.SynchronizeMemory();
             }
 
@@ -157,6 +179,118 @@ namespace Ryujinx.Graphics.Gpu.Image
         }
 
         /// <summary>
+        /// Loads all the textures currently registered by the guest application on the pool.
+        /// This is required for bindless access, as it's not possible to predict which textures will be used.
+        /// </summary>
+        /// <param name="renderer">Renderer of the current GPU context</param>
+        /// <param name="activeSamplerPool">The currently active sampler pool</param>
+        public void LoadAll(IRenderer renderer, SamplerPool activeSamplerPool)
+        {
+            if (activeSamplerPool == null || _bindlessDisable)
+            {
+                return;
+            }
+
+            activeSamplerPool.LoadAll();
+
+            if (SequenceNumber != Context.SequenceNumber)
+            {
+                SequenceNumber = Context.SequenceNumber;
+
+                SynchronizeMemory();
+            }
+
+            var list = _bindlessList;
+
+            ModifiedEntries.BeginIterating();
+
+            int id;
+
+            while ((id = ModifiedEntries.GetNextAndClear()) >= 0)
+            {
+                Texture texture = Items[id] ?? GetValidated(id, true);
+
+                if (texture != null)
+                {
+                    list.Add((id, texture));
+                }
+            }
+
+            // If the total amount of textures and samplers combination would be higher
+            // than the maximum number of handles we can create, then disable bindless emulation.
+            if (activeSamplerPool.Samplers.Count * list.Count > 0x80000)
+            {
+                _bindlessDisable = true;
+                list.Clear();
+                Logger.Warning?.Print(LogClass.Gpu, "Too many textures, full bindless texture emulation has been disabled.");
+                return;
+            }
+
+            for (int i = 0; i < list.Count; i++)
+            {
+                (id, Texture texture) = list[i];
+
+                foreach (var kv in activeSamplerPool.Samplers)
+                {
+                    Sampler sampler = kv.Key;
+                    int samplerId = kv.Value;
+
+                    renderer.Pipeline.SetBindlessTexture(id, texture.HostTexture, samplerId, sampler.GetHostSampler(texture));
+                }
+            }
+
+            list.Clear();
+        }
+
+        /// <summary>
+        /// Gets the texture at the given <paramref name="id"/> from the cache,
+        /// or creates a new one if not found.
+        /// </summary>
+        /// <param name="id">Index of the texture on the pool</param>
+        /// <param name="forBindless">Indicates that the texture is only used for bindless access</param>
+        /// <returns>Texture for the given pool index</returns>
+        private Texture GetValidated(int id, bool forBindless = false)
+        {
+            TextureDescriptor descriptor = GetDescriptor(id);
+
+            if (!FormatTable.TryGetTextureFormat(descriptor.UnpackFormat(), descriptor.UnpackSrgb(), out _))
+            {
+                return null;
+            }
+
+            TextureInfo info = GetInfo(descriptor, out int layerSize);
+
+            // For bindless, we exclude 3D textures due to the current method used for 2D to 3D
+            // slice copies, that only happens when the 3D texture is created for the first time.
+            if (forBindless && info.Target == Target.Texture3D)
+            {
+                return null;
+            }
+
+            TextureValidationResult validationResult = TextureValidation.Validate(ref info);
+
+            if (validationResult != TextureValidationResult.Valid)
+            {
+                return null;
+            }
+
+            // TODO: Eventually get rid of that...
+            if (forBindless && (info.Width > 8192 || info.Height > 8192 || info.DepthOrLayers > 8192))
+            {
+                return null;
+            }
+
+            try
+            {
+                return Get(id);
+            }
+            catch (Ryujinx.Memory.InvalidMemoryRegionException)
+            {
+                return null;
+            }
+        }
+
+        /// <summary>
         /// Forcibly remove a texture from this pool's items.
         /// If deferred, the dereference will be queued to occur on the render thread.
         /// </summary>
@@ -169,7 +303,7 @@ namespace Ryujinx.Graphics.Gpu.Image
 
             if (deferred)
             {
-                _dereferenceQueue.Enqueue(texture);
+                _dereferenceQueue.Enqueue(new DereferenceRequest(texture));
             }
             else
             {
@@ -178,15 +312,81 @@ namespace Ryujinx.Graphics.Gpu.Image
         }
 
         /// <summary>
+        /// Queues a request to update a texture's mapping. 
+        /// Mapping is updated later to avoid deleting the texture if it is still sparsely mapped.
+        /// </summary>
+        /// <param name="texture">Texture with potential mapping change</param>
+        /// <param name="id">ID in cache of texture with potential mapping change</param>
+        public void QueueUpdateMapping(Texture texture, int id)
+        {
+            Items[id] = null;
+
+            _dereferenceQueue.Enqueue(new DereferenceRequest(true, texture, id));
+        }
+
+        /// <summary>
         /// Process the dereference queue, decrementing the reference count for each texture in it.
         /// This is used to ensure that texture disposal happens on the render thread.
         /// </summary>
-        private void ProcessDereferenceQueue()
+        /// <param name="id">The ID of the entry that triggered this method</param>
+        /// <returns>Texture that matches the entry ID if it has been readded to the cache.</returns>
+        private Texture ProcessDereferenceQueue(int id = -1)
         {
-            while (_dereferenceQueue.TryDequeue(out Texture toRemove))
+            while (_dereferenceQueue.TryDequeue(out DereferenceRequest request))
             {
-                toRemove.DecrementReferenceCount();
+                Texture texture = request.Texture;
+
+                // Unmapped storage textures can swap their ranges. The texture must be storage with no views.
+                // TODO: Would need to update ranges on views, or guarantee that ones where the range changes can be instantly deleted.
+
+                // TODO: Needs to behave differently if a texture's mapping has already changed - must remove from cache if
+                // the mapping is different again, as the mapping cannot be different on two entries of the pool.
+
+                if (request.IsUnmapped && texture.Group.Storage == texture && !texture.HasViews)
+                {
+                    // Has the mapping for this texture changed?
+                    ref readonly TextureDescriptor descriptor = ref GetDescriptorRef(request.ID);
+
+                    MultiRange range = _channel.MemoryManager.GetPhysicalRegions(descriptor.UnpackAddress(), texture.Size);
+
+                    // If the texture is not mapped at all, delete its reference.
+
+                    if (range.Count == 1 && range.GetSubRange(0).Address == MemoryManager.PteUnmapped)
+                    {
+                        texture.DecrementReferenceCount();
+                        continue;
+                    }
+
+                    Items[request.ID] = texture;
+
+                    // Create a new pool reference, as the last one was removed on unmap.
+
+                    texture.IncrementReferenceCount(this, request.ID);
+                    texture.DecrementReferenceCount();
+
+                    // Refetch the range. Changes since the last check could have been lost
+                    // as the cache entry was not restored (required to queue mapping change)
+
+                    range = _channel.MemoryManager.GetPhysicalRegions(descriptor.UnpackAddress(), texture.Size);
+
+                    if (!range.Equals(texture.Range))
+                    {
+                        // Part of the texture was mapped or unmapped. Replace the range and regenerate tracking handles.
+                        _channel.MemoryManager.Physical.TextureCache.UpdateMapping(texture, range);
+                    }
+
+                    if (request.ID == id)
+                    {
+                        return texture;
+                    }
+                }
+                else
+                {
+                    texture.DecrementReferenceCount();
+                }
             }
+
+            return null;
         }
 
         /// <summary>
@@ -208,19 +408,27 @@ namespace Ryujinx.Graphics.Gpu.Image
 
                 if (texture != null)
                 {
-                    TextureDescriptor descriptor = PhysicalMemory.Read<TextureDescriptor>(address);
+                    ref TextureDescriptor cachedDescriptor = ref DescriptorCache[id];
+                    ref readonly TextureDescriptor descriptor = ref GetDescriptorRefAddress(address);
 
                     // If the descriptors are the same, the texture is the same,
                     // we don't need to remove as it was not modified. Just continue.
-                    if (descriptor.Equals(ref DescriptorCache[id]))
+                    if (descriptor.Equals(ref cachedDescriptor))
                     {
                         continue;
+                    }
+
+                    if (texture.HasOneReference())
+                    {
+                        _channel.MemoryManager.Physical.TextureCache.AddShortCache(texture, ref cachedDescriptor);
                     }
 
                     texture.DecrementReferenceCount(this, id);
 
                     Items[id] = null;
                 }
+
+                ModifiedEntries.Set(id);
             }
         }
 

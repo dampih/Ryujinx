@@ -108,6 +108,12 @@ namespace Ryujinx.Graphics.Gpu.Shader.DiskCache
         }
 
         /// <inheritdoc/>
+        public AttributeType QueryFragmentOutputType(int location)
+        {
+            return _oldSpecState.GraphicsState.FragmentOutputTypes[location];
+        }
+
+        /// <inheritdoc/>
         public int QueryComputeLocalSizeX() => _oldSpecState.ComputeState.LocalSizeX;
 
         /// <inheritdoc/>
@@ -127,6 +133,12 @@ namespace Ryujinx.Graphics.Gpu.Shader.DiskCache
         {
             _newSpecState.RecordConstantBufferUse(_stageIndex, _oldSpecState.ConstantBufferUse[_stageIndex]);
             return _oldSpecState.ConstantBufferUse[_stageIndex];
+        }
+
+        /// <inheritdoc/>
+        public bool QueryHasConstantBufferDrawParameters()
+        {
+            return _oldSpecState.GraphicsState.HasConstantBufferDrawParameters;
         }
 
         /// <inheritdoc/>
@@ -217,6 +229,12 @@ namespace Ryujinx.Graphics.Gpu.Shader.DiskCache
         {
             _newSpecState.RecordEarlyZForce();
             return _oldSpecState.GraphicsState.EarlyZForce;
+        }
+
+        /// <inheritdoc/>
+        public bool QueryHasUnalignedStorageBuffer()
+        {
+            return _oldSpecState.GraphicsState.HasUnalignedStorageBuffer || _oldSpecState.ComputeState.HasUnalignedStorageBuffer;
         }
 
         /// <inheritdoc/>

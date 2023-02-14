@@ -3,22 +3,20 @@ using System;
 
 namespace Ryujinx.Graphics.GAL.Multithreading.Commands
 {
-    struct SetStorageBuffersCommand : IGALCommand
+    struct SetStorageBuffersCommand : IGALCommand, IGALCommand<SetStorageBuffersCommand>
     {
         public CommandType CommandType => CommandType.SetStorageBuffers;
-        private int _first;
-        private SpanRef<BufferRange> _buffers;
+        private SpanRef<BufferAssignment> _buffers;
 
-        public void Set(int first, SpanRef<BufferRange> buffers)
+        public void Set(SpanRef<BufferAssignment> buffers)
         {
-            _first = first;
             _buffers = buffers;
         }
 
         public static void Run(ref SetStorageBuffersCommand command, ThreadedRenderer threaded, IRenderer renderer)
         {
-            Span<BufferRange> buffers = command._buffers.Get(threaded);
-            renderer.Pipeline.SetStorageBuffers(command._first, threaded.Buffers.MapBufferRanges(buffers));
+            Span<BufferAssignment> buffers = command._buffers.Get(threaded);
+            renderer.Pipeline.SetStorageBuffers(threaded.Buffers.MapBufferRanges(buffers));
             command._buffers.Dispose(threaded);
         }
     }

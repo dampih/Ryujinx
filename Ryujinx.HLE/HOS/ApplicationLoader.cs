@@ -1,4 +1,3 @@
-using ARMeilleure.Translation.PTC;
 using LibHac;
 using LibHac.Account;
 using LibHac.Common;
@@ -14,8 +13,8 @@ using LibHac.Tools.FsSystem;
 using LibHac.Tools.FsSystem.NcaUtils;
 using Ryujinx.Common.Configuration;
 using Ryujinx.Common.Logging;
+using Ryujinx.Cpu;
 using Ryujinx.HLE.FileSystem;
-using Ryujinx.HLE.HOS.Kernel.Process;
 using Ryujinx.HLE.Loaders.Executables;
 using Ryujinx.Memory;
 using System;
@@ -25,8 +24,6 @@ using System.IO;
 using System.Linq;
 using System.Reflection;
 using System.Text;
-
-using static LibHac.Fs.ApplicationSaveDataManagement;
 using static Ryujinx.HLE.HOS.ModLoader;
 using ApplicationId = LibHac.Ncm.ApplicationId;
 using Path = System.IO.Path;
@@ -68,6 +65,10 @@ namespace Ryujinx.HLE.HOS
         public bool TitleIs64Bit { get; private set; }
 
         public string TitleIdText => TitleId.ToString("x16");
+        
+        public string BuildId { get; private set; }
+
+        public IDiskCacheLoadState DiskCacheLoadState { get; private set; }
 
         public ApplicationLoader(Switch device)
         {
@@ -77,11 +78,6 @@ namespace Ryujinx.HLE.HOS
 
         public void LoadCart(string exeFsDir, string romFsFile = null)
         {
-            if (romFsFile != null)
-            {
-                _device.Configuration.VirtualFileSystem.LoadRomFs(romFsFile);
-            }
-
             LocalFileSystem codeFs = new LocalFileSystem(exeFsDir);
 
             MetaLoader metaData = ReadNpdm(codeFs);
@@ -96,7 +92,12 @@ namespace Ryujinx.HLE.HOS
                 EnsureSaveData(new ApplicationId(TitleId));
             }
 
-            LoadExeFs(codeFs, metaData);
+            ulong pid = LoadExeFs(codeFs, string.Empty, metaData);
+
+            if (romFsFile != null)
+            {
+                _device.Configuration.VirtualFileSystem.LoadRomFs(pid, romFsFile);
+            }
         }
 
         public static (Nca main, Nca patch, Nca control) GetGameData(VirtualFileSystem fileSystem, PartitionFileSystem pfs, int programIndex)
@@ -212,7 +213,7 @@ namespace Ryujinx.HLE.HOS
 
             return (null, null);
         }
-
+        
         public void LoadXci(string xciFile)
         {
             FileStream file = new FileStream(xciFile, FileMode.Open, FileAccess.Read);
@@ -304,12 +305,6 @@ namespace Ryujinx.HLE.HOS
 
         public void LoadServiceNca(string ncaFile)
         {
-            // Disable PPTC here as it does not support multiple processes running.
-            // TODO: This should be eventually removed and it should stop using global state and
-            // instead manage the cache per process.
-            Ptc.Close();
-            PtcProfiler.Stop();
-
             FileStream file = new FileStream(ncaFile, FileMode.Open, FileAccess.Read);
             Nca mainNca = new Nca(_device.Configuration.VirtualFileSystem.KeySet, file.AsStorage(false));
 
@@ -371,16 +366,12 @@ namespace Ryujinx.HLE.HOS
             // Collect the nsos, ignoring ones that aren't used.
             NsoExecutable[] programs = nsos.Where(x => x != null).ToArray();
 
-            MemoryManagerMode memoryManagerMode = _device.Configuration.MemoryManagerMode;
-
-            if (!MemoryBlock.SupportsFlags(MemoryAllocationFlags.ViewCompatible))
-            {
-                memoryManagerMode = MemoryManagerMode.SoftwarePageTable;
-            }
+            string displayVersion = _device.System.ContentManager.GetCurrentFirmwareVersion().VersionString;
+            bool usePtc = _device.System.EnablePtc;
 
             metaData.GetNpdm(out Npdm npdm).ThrowIfFailure();
-            ProgramInfo programInfo = new ProgramInfo(in npdm, allowCodeMemoryForJit: false);
-            ProgramLoader.LoadNsos(_device.System.KernelContext, out _, metaData, programInfo, executables: programs);
+            ProgramInfo programInfo = new ProgramInfo(in npdm, displayVersion, usePtc, allowCodeMemoryForJit: false);
+            ProgramLoader.LoadNsos(_device.System.KernelContext, metaData, programInfo, executables: programs);
 
             string titleIdText = npdm.Aci.Value.ProgramId.Value.ToString("x16");
             bool titleIs64Bit = (npdm.Meta.Value.Flags & 1) != 0;
@@ -428,9 +419,9 @@ namespace Ryujinx.HLE.HOS
                 {
                     foreach (DownloadableContentNca downloadableContentNca in downloadableContentContainer.DownloadableContentNcaList)
                     {
-                        if (File.Exists(downloadableContentContainer.ContainerPath))
+                        if (File.Exists(downloadableContentContainer.ContainerPath) && downloadableContentNca.Enabled)
                         {
-                            _device.Configuration.ContentManager.AddAocItem(downloadableContentNca.TitleId, downloadableContentContainer.ContainerPath, downloadableContentNca.FullPath, downloadableContentNca.Enabled);
+                            _device.Configuration.ContentManager.AddAocItem(downloadableContentNca.TitleId, downloadableContentContainer.ContainerPath, downloadableContentNca.FullPath);
                         }
                         else
                         {
@@ -479,9 +470,11 @@ namespace Ryujinx.HLE.HOS
                 _device.Configuration.VirtualFileSystem.ModLoader.GetModsBasePath(),
                 _device.Configuration.VirtualFileSystem.ModLoader.GetSdModsBasePath());
 
+            string displayVersion = string.Empty;
+
             if (controlNca != null)
             {
-                ReadControlData(_device, controlNca, ref _controlData, ref _titleName, ref _displayVersion);
+                ReadControlData(_device, controlNca, ref _controlData, ref _titleName, ref displayVersion);
             }
             else
             {
@@ -495,8 +488,12 @@ namespace Ryujinx.HLE.HOS
                 string dummyTitleName = "";
                 BlitStruct<ApplicationControlProperty> dummyControl = new BlitStruct<ApplicationControlProperty>(1);
 
-                ReadControlData(_device, updateProgram0ControlNca, ref dummyControl, ref dummyTitleName, ref _displayVersion);
+                ReadControlData(_device, updateProgram0ControlNca, ref dummyControl, ref dummyTitleName, ref displayVersion);
             }
+
+            _displayVersion = displayVersion;
+
+            ulong pid = LoadExeFs(codeFs, displayVersion, metaData);
 
             if (dataStorage == null)
             {
@@ -506,7 +503,7 @@ namespace Ryujinx.HLE.HOS
             {
                 IStorage newStorage = _device.Configuration.VirtualFileSystem.ModLoader.ApplyRomFsMods(TitleId, dataStorage);
 
-                _device.Configuration.VirtualFileSystem.SetRomFs(newStorage.AsStream(FileAccess.Read));
+                _device.Configuration.VirtualFileSystem.SetRomFs(pid, newStorage.AsStream(FileAccess.Read));
             }
 
             // Don't create save data for system programs.
@@ -516,8 +513,6 @@ namespace Ryujinx.HLE.HOS
                 // We'll know if this changes in the future because stuff will get errors when trying to mount the correct save.
                 EnsureSaveData(new ApplicationId(TitleId & ~0xFul));
             }
-
-            LoadExeFs(codeFs, metaData);
 
             Logger.Info?.Print(LogClass.Loader, $"Application Loaded: {TitleName} v{DisplayVersion} [{TitleIdText}] [{(TitleIs64Bit ? "64-bit" : "32-bit")}]");
         }
@@ -586,7 +581,7 @@ namespace Ryujinx.HLE.HOS
             }
         }
 
-        private void LoadExeFs(IFileSystem codeFs, MetaLoader metaData = null, bool isHomebrew = false)
+        private ulong LoadExeFs(IFileSystem codeFs, string displayVersion, MetaLoader metaData = null, bool isHomebrew = false)
         {
             if (_device.Configuration.VirtualFileSystem.ModLoader.ReplaceExefsPartition(TitleId, ref codeFs))
             {
@@ -651,27 +646,35 @@ namespace Ryujinx.HLE.HOS
                 memoryManagerMode = MemoryManagerMode.SoftwarePageTable;
             }
 
-            Ptc.Initialize(TitleIdText, DisplayVersion, usePtc, memoryManagerMode);
-
             // We allow it for nx-hbloader because it can be used to launch homebrew.
             bool allowCodeMemoryForJit = TitleId == 0x010000000000100DUL || isHomebrew;
 
             metaData.GetNpdm(out Npdm npdm).ThrowIfFailure();
-            ProgramInfo programInfo = new ProgramInfo(in npdm, allowCodeMemoryForJit);
-            ProgramLoader.LoadNsos(_device.System.KernelContext, out ProcessTamperInfo tamperInfo, metaData, programInfo, executables: programs);
+            ProgramInfo programInfo = new ProgramInfo(in npdm, displayVersion, usePtc, allowCodeMemoryForJit);
+            ProgramLoadResult result = ProgramLoader.LoadNsos(_device.System.KernelContext, metaData, programInfo, executables: programs);
 
-            _device.Configuration.VirtualFileSystem.ModLoader.LoadCheats(TitleId, tamperInfo, _device.TamperMachine);
+            DiskCacheLoadState = result.DiskCacheLoadState;
+
+            _device.Configuration.VirtualFileSystem.ModLoader.LoadCheats(TitleId, result.TamperInfo, _device.TamperMachine);
+
+            string[] buildIds = programs.Where(e => e.Name == "main").Select(e =>
+                (BitConverter.ToString(e.BuildId.ItemsRo.ToArray())).Replace("-", "").ToUpper()).ToArray();
+
+            BuildId = buildIds.Any() ? buildIds.First()[..Cheat.CheatIdSize] : string.Empty;
+
+            return result.ProcessId;
         }
 
         public void LoadProgram(string filePath)
         {
             MetaLoader metaData = GetDefaultNpdm();
             metaData.GetNpdm(out Npdm npdm).ThrowIfFailure();
-            ProgramInfo programInfo = new ProgramInfo(in npdm, allowCodeMemoryForJit: true);
+            ProgramInfo programInfo = new ProgramInfo(in npdm, string.Empty, diskCacheEnabled: false, allowCodeMemoryForJit: true);
 
             bool isNro = Path.GetExtension(filePath).ToLower() == ".nro";
 
             IExecutable executable;
+            Stream romfsStream = null;
 
             if (isNro)
             {
@@ -704,7 +707,7 @@ namespace Ryujinx.HLE.HOS
 
                             if (romfsSize != 0)
                             {
-                                _device.Configuration.VirtualFileSystem.SetRomFs(new HomebrewRomFsStream(input, obj.FileSize + (long)romfsOffset));
+                                romfsStream = new HomebrewRomFsStream(input, obj.FileSize + (long)romfsOffset);
                             }
 
                             if (nacpSize != 0)
@@ -763,9 +766,16 @@ namespace Ryujinx.HLE.HOS
             Graphics.Gpu.GraphicsConfig.TitleId = null;
             _device.Gpu.HostInitalized.Set();
 
-            ProgramLoader.LoadNsos(_device.System.KernelContext, out ProcessTamperInfo tamperInfo, metaData, programInfo, executables: executable);
+            ProgramLoadResult result = ProgramLoader.LoadNsos(_device.System.KernelContext, metaData, programInfo, executables: executable);
 
-            _device.Configuration.VirtualFileSystem.ModLoader.LoadCheats(TitleId, tamperInfo, _device.TamperMachine);
+            if (romfsStream != null)
+            {
+                _device.Configuration.VirtualFileSystem.SetRomFs(result.ProcessId, romfsStream);
+            }
+
+            DiskCacheLoadState = result.DiskCacheLoadState;
+
+            _device.Configuration.VirtualFileSystem.ModLoader.LoadCheats(TitleId, result.TamperInfo, _device.TamperMachine);
         }
 
         private MetaLoader GetDefaultNpdm()
@@ -852,7 +862,7 @@ namespace Ryujinx.HLE.HOS
             for (int i = 0; i < programCount; i++)
             {
                 mapInfo[i].ProgramId = new ProgramId(applicationId + (uint)i);
-                mapInfo[i].MainProgramId = new ProgramId(applicationId);
+                mapInfo[i].MainProgramId = new ApplicationId(applicationId);
                 mapInfo[i].ProgramIndex = (byte)i;
             }
 

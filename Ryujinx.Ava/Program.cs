@@ -1,67 +1,54 @@
-using ARMeilleure.Translation.PTC;
 using Avalonia;
-using Avalonia.OpenGL;
-using Avalonia.Rendering;
 using Avalonia.Threading;
-using Ryujinx.Ava.Ui.Backend;
-using Ryujinx.Ava.Ui.Controls;
-using Ryujinx.Ava.Ui.Windows;
+using Ryujinx.Ava.UI.Helpers;
+using Ryujinx.Ava.UI.Windows;
 using Ryujinx.Common;
 using Ryujinx.Common.Configuration;
 using Ryujinx.Common.GraphicsDriver;
 using Ryujinx.Common.Logging;
-using Ryujinx.Common.System;
 using Ryujinx.Common.SystemInfo;
-using Ryujinx.Graphics.Vulkan;
+using Ryujinx.Common.SystemInterop;
 using Ryujinx.Modules;
+using Ryujinx.SDL2.Common;
 using Ryujinx.Ui.Common;
 using Ryujinx.Ui.Common.Configuration;
-using Silk.NET.Vulkan.Extensions.EXT;
-using Silk.NET.Vulkan.Extensions.KHR;
+using Ryujinx.Ui.Common.Helper;
 using System;
-using System.Collections.Generic;
 using System.IO;
 using System.Runtime.InteropServices;
 using System.Threading.Tasks;
 
 namespace Ryujinx.Ava
 {
-    internal class Program
+    internal partial class Program
     {
-        public static double WindowScaleFactor { get; set; }
-        public static double ActualScaleFactor { get; set; }
-        public static string Version { get; private set; }
-        public static string ConfigurationPath { get; private set; }
-        public static string CommandLineProfile { get; set; }
-        public static bool PreviewerDetached { get; private set; }
+        public static double WindowScaleFactor  { get; set; }
+        public static double DesktopScaleFactor { get; set; } = 1.0;
+        public static string Version            { get; private set; }
+        public static string ConfigurationPath  { get; private set; }
+        public static bool   PreviewerDetached  { get; private set; }
 
-        public static RenderTimer RenderTimer { get; private set; }
-        public static bool UseVulkan { get; private set; }
-
-        [DllImport("user32.dll", SetLastError = true)]
-        public static extern int MessageBoxA(IntPtr hWnd, string text, string caption, uint type);
+        [LibraryImport("user32.dll", SetLastError = true)]
+        public static partial int MessageBoxA(IntPtr hWnd, [MarshalAs(UnmanagedType.LPStr)] string text, [MarshalAs(UnmanagedType.LPStr)] string caption, uint type);
 
         private const uint MB_ICONWARNING = 0x30;
-        private const int BaseDpi = 96;
 
         public static void Main(string[] args)
         {
-            Version = ReleaseInformations.GetVersion();
+            Version = ReleaseInformation.GetVersion();
 
             if (OperatingSystem.IsWindows() && !OperatingSystem.IsWindowsVersionAtLeast(10, 0, 17134))
             {
-                MessageBoxA(IntPtr.Zero, "You are running an outdated version of Windows.\n\nStarting on June 1st 2022, Ryujinx will only support Windows 10 1803 and newer.\n", $"Ryujinx {Version}", MB_ICONWARNING);
+                _ = MessageBoxA(IntPtr.Zero, "You are running an outdated version of Windows.\n\nStarting on June 1st 2022, Ryujinx will only support Windows 10 1803 and newer.\n", $"Ryujinx {Version}", MB_ICONWARNING);
             }
 
             PreviewerDetached = true;
 
             Initialize(args);
 
-            RenderTimer = new RenderTimer();
+            LoggerAdapter.Register();
 
             BuildAvaloniaApp().StartWithClassicDesktopLifetime(args);
-
-            RenderTimer.Dispose();
         }
 
         public static AppBuilder BuildAvaloniaApp()
@@ -71,90 +58,24 @@ namespace Ryujinx.Ava
                 .With(new X11PlatformOptions
                 {
                     EnableMultiTouch = true,
-                    EnableIme = true,
-                    UseEGL = false,
-                    UseGpu = !UseVulkan,
-                    GlProfiles = new List<GlVersion>()
-                    {
-                        new GlVersion(GlProfileType.OpenGL, 4, 3)
-                    }
+                    EnableIme        = true,
+                    UseEGL           = false,
+                    UseGpu           = true
                 })
                 .With(new Win32PlatformOptions
                 {
-                    EnableMultitouch = true,
-                    UseWgl = !UseVulkan,
-                    WglProfiles = new List<GlVersion>()
-                    {
-                        new GlVersion(GlProfileType.OpenGL, 4, 3)
-                    },
-                    AllowEglInitialization = false,
-                    CompositionBackdropCornerRadius = 8f,
+                    EnableMultitouch                = true,
+                    UseWgl                          = false,
+                    AllowEglInitialization          = false,
+                    CompositionBackdropCornerRadius = 8.0f,
                 })
-                .UseSkia()
-                .With(new Ui.Vulkan.VulkanOptions()
-                {
-                    ApplicationName = "Ryujinx.Graphics.Vulkan",
-                    VulkanVersion = new Version(1, 2),
-                    MaxQueueCount = 2,
-                    PreferDiscreteGpu = true,
-                    PreferredDevice = !PreviewerDetached ? "" : ConfigurationState.Instance.Graphics.PreferredGpu.Value,
-                    UseDebug = !PreviewerDetached ? false : ConfigurationState.Instance.Logger.GraphicsDebugLevel.Value != GraphicsDebugLevel.None,
-                })
-                .With(new SkiaOptions()
-                {
-                    CustomGpuFactory = UseVulkan ? SkiaGpuFactory.CreateVulkanGpu : null
-                })
-                .AfterSetup(_ =>
-                {
-                    AvaloniaLocator.CurrentMutable
-                        .Bind<IRenderTimer>().ToConstant(RenderTimer)
-                        .Bind<IRenderLoop>().ToConstant(new RenderLoop(RenderTimer, Dispatcher.UIThread));
-                })
-                .LogToTrace();
+                .UseSkia();
         }
 
         private static void Initialize(string[] args)
         {
-            // Parse Arguments.
-            string launchPathArg = null;
-            string baseDirPathArg = null;
-            bool startFullscreenArg = false;
-
-            for (int i = 0; i < args.Length; ++i)
-            {
-                string arg = args[i];
-
-                if (arg == "-r" || arg == "--root-data-dir")
-                {
-                    if (i + 1 >= args.Length)
-                    {
-                        Logger.Error?.Print(LogClass.Application, $"Invalid option '{arg}'");
-
-                        continue;
-                    }
-
-                    baseDirPathArg = args[++i];
-                }
-                else if (arg == "-p" || arg == "--profile")
-                {
-                    if (i + 1 >= args.Length)
-                    {
-                        Logger.Error?.Print(LogClass.Application, $"Invalid option '{arg}'");
-
-                        continue;
-                    }
-
-                    CommandLineProfile = args[++i];
-                }
-                else if (arg == "-f" || arg == "--fullscreen")
-                {
-                    startFullscreenArg = true;
-                }
-                else
-                {
-                    launchPathArg = arg;
-                }
-            }
+            // Parse arguments
+            CommandLineState.ParseArguments(args);
 
             // Delete backup files after updating.
             Task.Run(Updater.CleanupUpdate);
@@ -162,11 +83,11 @@ namespace Ryujinx.Ava
             Console.Title = $"Ryujinx Console {Version}";
 
             // Hook unhandled exception and process exit events.
-            AppDomain.CurrentDomain.UnhandledException += (object sender, UnhandledExceptionEventArgs e) => ProcessUnhandledException(e.ExceptionObject as Exception, e.IsTerminating);
-            AppDomain.CurrentDomain.ProcessExit += (object sender, EventArgs e) => Exit();
+            AppDomain.CurrentDomain.UnhandledException += (sender, e) => ProcessUnhandledException(e.ExceptionObject as Exception, e.IsTerminating);
+            AppDomain.CurrentDomain.ProcessExit        += (sender, e) => Exit();
 
             // Setup base data directory.
-            AppDataManager.Initialize(baseDirPathArg);
+            AppDataManager.Initialize(CommandLineState.BaseDirPathArg);
 
             // Initialize the configuration.
             ConfigurationState.Initialize();
@@ -177,30 +98,23 @@ namespace Ryujinx.Ava
             // Initialize Discord integration.
             DiscordIntegrationModule.Initialize();
 
+            // Initialize SDL2 driver
+            SDL2Driver.MainThreadDispatcher = action => Dispatcher.UIThread.InvokeAsync(action, DispatcherPriority.Input);
+
             ReloadConfig();
 
-            UseVulkan = PreviewerDetached ? ConfigurationState.Instance.Graphics.GraphicsBackend.Value == GraphicsBackend.Vulkan : false;
-
-            if (UseVulkan)
-            {
-                // With a custom gpu backend, avalonia doesn't enable dpi awareness, so the backend must handle it. This isn't so for the opengl backed,
-                // as that uses avalonia's gpu backend and it's enabled there.
-                ForceDpiAware.Windows();
-            }
+            ForceDpiAware.Windows();
 
             WindowScaleFactor = ForceDpiAware.GetWindowScaleFactor();
-            ActualScaleFactor = ForceDpiAware.GetActualScaleFactor() / BaseDpi;
 
             // Logging system information.
             PrintSystemInfo();
 
             // Enable OGL multithreading on the driver, when available.
-            BackendThreading threadingMode = ConfigurationState.Instance.Graphics.BackendThreading;
-            DriverUtilities.ToggleOGLThreading(threadingMode == BackendThreading.Off);
+            DriverUtilities.ToggleOGLThreading(ConfigurationState.Instance.Graphics.BackendThreading == BackendThreading.Off);
 
             // Check if keys exists.
-            bool hasSystemProdKeys = File.Exists(Path.Combine(AppDataManager.KeysDirPath, "prod.keys"));
-            if (!hasSystemProdKeys)
+            if (!File.Exists(Path.Combine(AppDataManager.KeysDirPath, "prod.keys")))
             {
                 if (!(AppDataManager.Mode == AppDataManager.LaunchMode.UserProfile && File.Exists(Path.Combine(AppDataManager.KeysDirPathUser, "prod.keys"))))
                 {
@@ -208,15 +122,15 @@ namespace Ryujinx.Ava
                 }
             }
 
-            if (launchPathArg != null)
+            if (CommandLineState.LaunchPathArg != null)
             {
-                MainWindow.DeferLoadApplication(launchPathArg, startFullscreenArg);
+                MainWindow.DeferLoadApplication(CommandLineState.LaunchPathArg, CommandLineState.StartFullscreenArg);
             }
         }
 
         public static void ReloadConfig()
         {
-            string localConfigurationPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "Config.json");
+            string localConfigurationPath   = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "Config.json");
             string appDataConfigurationPath = Path.Combine(AppDataManager.BaseDirPath, "Config.json");
 
             // Now load the configuration as the other subsystems are now registered
@@ -250,6 +164,25 @@ namespace Ryujinx.Ava
                     Logger.Warning?.PrintMsg(LogClass.Application, $"Failed to load config! Loading the default config instead.\nFailed config location {ConfigurationPath}");
                 }
             }
+
+            // Check if graphics backend was overridden
+            if (CommandLineState.OverrideGraphicsBackend != null)
+            {
+                if (CommandLineState.OverrideGraphicsBackend.ToLower() == "opengl")
+                {
+                    ConfigurationState.Instance.Graphics.GraphicsBackend.Value = GraphicsBackend.OpenGl;
+                }
+                else if (CommandLineState.OverrideGraphicsBackend.ToLower() == "vulkan")
+                {
+                    ConfigurationState.Instance.Graphics.GraphicsBackend.Value = GraphicsBackend.Vulkan;
+                }
+            }
+
+            // Check if docked mode was overriden.
+            if (CommandLineState.OverrideDockedMode.HasValue)
+            {
+                ConfigurationState.Instance.System.EnableDockedMode.Value = CommandLineState.OverrideDockedMode.Value;
+            }
         }
 
         private static void PrintSystemInfo()
@@ -257,8 +190,7 @@ namespace Ryujinx.Ava
             Logger.Notice.Print(LogClass.Application, $"Ryujinx Version: {Version}");
             SystemInfo.Gather().Print();
 
-            var enabledLogs = Logger.GetEnabledLevels();
-            Logger.Notice.Print(LogClass.Application, $"Logs Enabled: {(enabledLogs.Count == 0 ? "<None>" : string.Join(", ", enabledLogs))}");
+            Logger.Notice.Print(LogClass.Application, $"Logs Enabled: {(Logger.GetEnabledLevels().Count == 0 ? "<None>" : string.Join(", ", Logger.GetEnabledLevels()))}");
 
             if (AppDataManager.Mode == AppDataManager.LaunchMode.Custom)
             {
@@ -272,9 +204,6 @@ namespace Ryujinx.Ava
 
         private static void ProcessUnhandledException(Exception ex, bool isTerminating)
         {
-            Ptc.Close();
-            PtcProfiler.Stop();
-
             string message = $"Unhandled exception caught: {ex}";
 
             Logger.Error?.PrintMsg(LogClass.Application, message);
@@ -293,9 +222,6 @@ namespace Ryujinx.Ava
         public static void Exit()
         {
             DiscordIntegrationModule.Exit();
-
-            Ptc.Dispose();
-            PtcProfiler.Dispose();
 
             Logger.Shutdown();
         }

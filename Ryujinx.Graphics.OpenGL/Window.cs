@@ -1,6 +1,7 @@
 using OpenTK.Graphics.OpenGL;
 using Ryujinx.Graphics.GAL;
-using Ryujinx.Graphics.OpenGL.Helper;
+using Ryujinx.Graphics.OpenGL.Effects;
+using Ryujinx.Graphics.OpenGL.Effects.Smaa;
 using Ryujinx.Graphics.OpenGL.Image;
 using System;
 
@@ -8,16 +9,24 @@ namespace Ryujinx.Graphics.OpenGL
 {
     class Window : IWindow, IDisposable
     {
-        private const int TextureCount = 3;
         private readonly OpenGLRenderer _renderer;
+
+        private bool _initialized;
 
         private int _width;
         private int _height;
-        private bool _sizeChanged;
+        private bool _updateSize;
         private int _copyFramebufferHandle;
-        private int _stagingFrameBuffer;
-        private int[] _stagingTextures;
-        private int _currentTexture;
+        private IPostProcessingEffect _antiAliasing;
+        private IScaler _upscaler;
+        private bool _isLinear;
+        private AntiAliasing _currentAntiAliasing;
+        private bool _updateEffect;
+        private UpscaleType _currentUpscaler;
+        private float _upscalerLevel;
+        private bool _updateUpscaler;
+        private bool _isBgra;
+        private TextureView _upscaledTexture;
 
         internal BackgroundContextWorker BackgroundContext { get; private set; }
 
@@ -26,28 +35,15 @@ namespace Ryujinx.Graphics.OpenGL
         public Window(OpenGLRenderer renderer)
         {
             _renderer = renderer;
-            _stagingTextures = new int[TextureCount];
         }
 
-        public void Present(ITexture texture, ImageCrop crop, Action<object> swapBuffersCallback)
+        public void Present(ITexture texture, ImageCrop crop, Action swapBuffersCallback)
         {
             GL.Disable(EnableCap.FramebufferSrgb);
 
-            if (_sizeChanged)
-            {
-                if (_stagingFrameBuffer != 0)
-                {
-                    GL.DeleteTextures(_stagingTextures.Length, _stagingTextures);
-                    GL.DeleteFramebuffer(_stagingFrameBuffer);
-                }
-
-                CreateStagingFramebuffer();
-                _sizeChanged = false;
-            }
-
             (int oldDrawFramebufferHandle, int oldReadFramebufferHandle) = ((Pipeline)_renderer.Pipeline).GetBoundFramebuffers();
 
-            CopyTextureToFrameBufferRGB(_stagingFrameBuffer, GetCopyFramebufferHandleLazy(), (TextureView)texture, crop, swapBuffersCallback);
+            CopyTextureToFrameBufferRGB(0, GetCopyFramebufferHandleLazy(), (TextureView)texture, crop, swapBuffersCallback);
 
             GL.BindFramebuffer(FramebufferTarget.ReadFramebuffer, oldReadFramebufferHandle);
             GL.BindFramebuffer(FramebufferTarget.DrawFramebuffer, oldDrawFramebufferHandle);
@@ -58,42 +54,48 @@ namespace Ryujinx.Graphics.OpenGL
             GL.PixelStore(PixelStoreParameter.UnpackAlignment, 4);
         }
 
-        private void CreateStagingFramebuffer()
-        {
-            _stagingFrameBuffer = GL.GenFramebuffer();
-            GL.GenTextures(_stagingTextures.Length, _stagingTextures);
-
-            GL.BindFramebuffer(FramebufferTarget.Framebuffer, _stagingFrameBuffer);
-
-            foreach (var stagingTexture in _stagingTextures)
-            {
-                GL.BindTexture(TextureTarget.Texture2D, stagingTexture);
-                GL.TexImage2D(TextureTarget.Texture2D, 0, PixelInternalFormat.Rgba8, _width, _height, 0, PixelFormat.Rgba, PixelType.UnsignedByte, IntPtr.Zero);
-
-                GL.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureMinFilter, (int)TextureMinFilter.Nearest);
-                GL.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureMagFilter, (int)TextureMagFilter.Nearest);
-                GL.FramebufferTexture2D(FramebufferTarget.Framebuffer, FramebufferAttachment.ColorAttachment0, TextureTarget.Texture2D, stagingTexture, 0);
-            }
-
-            GL.BindFramebuffer(FramebufferTarget.Framebuffer, 0);
-            GL.BindTexture(TextureTarget.Texture2D, 0);
-        }
+        public void ChangeVSyncMode(bool vsyncEnabled) { }
 
         public void SetSize(int width, int height)
         {
             _width = width;
             _height = height;
-            _sizeChanged = true;
+
+            _updateSize = true;
         }
 
-        private void CopyTextureToFrameBufferRGB(int drawFramebuffer, int readFramebuffer, TextureView view, ImageCrop crop, Action<object> swapBuffersCallback)
+        private void CopyTextureToFrameBufferRGB(int drawFramebuffer, int readFramebuffer, TextureView view, ImageCrop crop, Action swapBuffersCallback)
         {
             GL.BindFramebuffer(FramebufferTarget.DrawFramebuffer, drawFramebuffer);
             GL.BindFramebuffer(FramebufferTarget.ReadFramebuffer, readFramebuffer);
 
-            GL.FramebufferTexture2D(FramebufferTarget.DrawFramebuffer, FramebufferAttachment.ColorAttachment0, TextureTarget.Texture2D, _stagingTextures[_currentTexture], 0);
-
             TextureView viewConverted = view.Format.IsBgr() ? _renderer.TextureCopy.BgraSwap(view) : view;
+
+            UpdateEffect();
+
+            if (_antiAliasing != null)
+            {
+                var oldView = viewConverted;
+
+                viewConverted = _antiAliasing.Run(viewConverted, _width, _height);
+
+                if (viewConverted.Format.IsBgr())
+                {
+                    var swappedView = _renderer.TextureCopy.BgraSwap(viewConverted);
+
+                    viewConverted?.Dispose();
+
+                    viewConverted = swappedView;
+                }
+
+                if(viewConverted != oldView && oldView != view)
+                {
+                    oldView.Dispose();
+                }
+            }
+            
+            GL.BindFramebuffer(FramebufferTarget.DrawFramebuffer, drawFramebuffer);
+            GL.BindFramebuffer(FramebufferTarget.ReadFramebuffer, readFramebuffer);
 
             GL.FramebufferTexture(
                 FramebufferTarget.ReadFramebuffer,
@@ -109,12 +111,12 @@ namespace Ryujinx.Graphics.OpenGL
             GL.Clear(ClearBufferMask.ColorBufferBit);
 
             int srcX0, srcX1, srcY0, srcY1;
-            float scale = view.ScaleFactor;
+            float scale = viewConverted.ScaleFactor;
 
             if (crop.Left == 0 && crop.Right == 0)
             {
                 srcX0 = 0;
-                srcX1 = (int)(view.Width / scale);
+                srcX1 = (int)(viewConverted.Width / scale);
             }
             else
             {
@@ -125,7 +127,7 @@ namespace Ryujinx.Graphics.OpenGL
             if (crop.Top == 0 && crop.Bottom == 0)
             {
                 srcY0 = 0;
-                srcY1 = (int)(view.Height / scale);
+                srcY1 = (int)(viewConverted.Height / scale);
             }
             else
             {
@@ -163,6 +165,39 @@ namespace Ryujinx.Graphics.OpenGL
                 ScreenCaptureRequested = false;
             }
 
+            if (_upscaler != null)
+            {
+                if(viewConverted.Format.IsBgr() && !_isBgra)
+                {
+                    RecreateUpscalingTexture(true);
+                }
+
+                _upscaler.Run(
+                    viewConverted,
+                    _upscaledTexture,
+                    _width,
+                    _height,
+                    srcX0,
+                    srcX1,
+                    srcY0,
+                    srcY1,
+                    dstX0,
+                    dstX1,
+                    dstY0,
+                    dstY1);
+
+                srcX0 = dstX0;
+                srcY0 = dstY0;
+                srcX1 = dstX1;
+                srcY1 = dstY1;
+
+                GL.FramebufferTexture(
+                    FramebufferTarget.ReadFramebuffer,
+                    FramebufferAttachment.ColorAttachment0,
+                    _upscaledTexture.Handle,
+                    0);
+            }
+
             GL.BlitFramebuffer(
                 srcX0,
                 srcY0,
@@ -173,7 +208,7 @@ namespace Ryujinx.Graphics.OpenGL
                 dstX1,
                 dstY1,
                 ClearBufferMask.ColorBufferBit,
-                BlitFramebufferFilter.Linear);
+                _isLinear ? BlitFramebufferFilter.Linear : BlitFramebufferFilter.Nearest);
 
             // Remove Alpha channel
             GL.ColorMask(false, false, false, true);
@@ -188,12 +223,8 @@ namespace Ryujinx.Graphics.OpenGL
             // Set clip control, viewport and the framebuffer to the output to placate overlays and OBS capture.
             GL.ClipControl(ClipOrigin.LowerLeft, ClipDepthMode.NegativeOneToOne);
             GL.Viewport(0, 0, _width, _height);
-            GL.BindFramebuffer(FramebufferTarget.Framebuffer, drawFramebuffer);
 
-            GL.BindFramebuffer(FramebufferTarget.ReadFramebuffer, _stagingFrameBuffer);
-
-            swapBuffersCallback((object)_stagingTextures[_currentTexture]);
-            _currentTexture = ++_currentTexture % _stagingTextures.Length;
+            swapBuffersCallback();
 
             ((Pipeline)_renderer.Pipeline).RestoreClipControl();
             ((Pipeline)_renderer.Pipeline).RestoreScissor0Enable();
@@ -223,6 +254,7 @@ namespace Ryujinx.Graphics.OpenGL
         public void InitializeBackgroundContext(IOpenGLContext baseContext)
         {
             BackgroundContext = new BackgroundContextWorker(baseContext);
+            _initialized = true;
         }
 
         public void CaptureFrame(int x, int y, int width, int height, bool isBgra, bool flipX, bool flipY)
@@ -237,6 +269,11 @@ namespace Ryujinx.Graphics.OpenGL
 
         public void Dispose()
         {
+            if (!_initialized)
+            {
+                return;
+            }
+
             BackgroundContext.Dispose();
 
             if (_copyFramebufferHandle != 0)
@@ -246,13 +283,134 @@ namespace Ryujinx.Graphics.OpenGL
                 _copyFramebufferHandle = 0;
             }
 
-            if (_stagingFrameBuffer != 0)
+            _antiAliasing?.Dispose();
+            _upscaler?.Dispose();
+            _upscaledTexture?.Dispose();
+        }
+
+        public void SetAntiAliasing(AntiAliasing effect)
+        {
+            if (_currentAntiAliasing == effect && _antiAliasing != null)
             {
-                GL.DeleteTextures(_stagingTextures.Length, _stagingTextures);
-                GL.DeleteFramebuffer(_stagingFrameBuffer);
-                _stagingFrameBuffer = 0;
-                _stagingTextures = null;
+                return;
             }
+
+            _currentAntiAliasing = effect;
+
+            _updateEffect = true;
+        }
+
+        public void SetUpscaler(UpscaleType type)
+        {
+            if (_currentUpscaler == type && _antiAliasing != null)
+            {
+                return;
+            }
+
+            _currentUpscaler = type;
+
+            _updateUpscaler = true;
+        }
+
+        private void UpdateEffect()
+        {
+            if (_updateEffect)
+            {
+                _updateEffect = false;
+
+                switch (_currentAntiAliasing)
+                {
+                    case AntiAliasing.Fxaa:
+                        _antiAliasing?.Dispose();
+                        _antiAliasing = new FxaaPostProcessingEffect(_renderer);
+                        break;
+                    case AntiAliasing.None:
+                        _antiAliasing?.Dispose();
+                        _antiAliasing = null;
+                        break;
+                    case AntiAliasing.SmaaLow:
+                    case AntiAliasing.SmaaMedium:
+                    case AntiAliasing.SmaaHigh:
+                    case AntiAliasing.SmaaUltra:
+                        var quality = _currentAntiAliasing - AntiAliasing.SmaaLow;
+                        if (_antiAliasing is SmaaPostProcessingEffect smaa)
+                        {
+                            smaa.Quality = quality;
+                        }
+                        else
+                        {
+                            _antiAliasing?.Dispose();
+                            _antiAliasing = new SmaaPostProcessingEffect(_renderer, quality);
+                        }
+                        break;
+                }
+            }
+
+            if (_updateSize && !_updateUpscaler)
+            {
+                RecreateUpscalingTexture();
+            }
+
+            _updateSize = false;
+
+            if (_updateUpscaler)
+            {
+                _updateUpscaler = false;
+
+                switch (_currentUpscaler)
+                {
+                    case UpscaleType.Bilinear:
+                    case UpscaleType.Nearest:
+                        _upscaler?.Dispose();
+                        _upscaler = null;
+                        _isLinear = _currentUpscaler == UpscaleType.Bilinear;
+                        _upscaledTexture?.Dispose();
+                        _upscaledTexture = null;
+                        break;
+                    case UpscaleType.Fsr:
+                        if (_upscaler is not FsrUpscaler)
+                        {
+                            _upscaler?.Dispose();
+                            _upscaler = new FsrUpscaler(_renderer, _antiAliasing);
+                        }
+                        _isLinear = false;
+                        _upscaler.Level = _upscalerLevel;
+
+                        RecreateUpscalingTexture();
+                        break;
+                }
+            }
+        }
+
+        private void RecreateUpscalingTexture(bool forceBgra = false)
+        {
+            _upscaledTexture?.Dispose();
+
+            var info = new TextureCreateInfo(
+                _width,
+                _height,
+                1,
+                1,
+                1,
+                1,
+                1,
+                1,
+                Format.R8G8B8A8Unorm,
+                DepthStencilMode.Depth,
+                Target.Texture2D,
+                forceBgra ? SwizzleComponent.Blue : SwizzleComponent.Red,
+                SwizzleComponent.Green,
+                forceBgra ? SwizzleComponent.Red : SwizzleComponent.Blue,
+                SwizzleComponent.Alpha);
+
+            _isBgra = forceBgra;
+            _upscaledTexture = _renderer.CreateTexture(info, 1) as TextureView;
+        }
+
+        public void SetUpscalerLevel(float level)
+        {
+            _upscalerLevel = level;
+            _updateUpscaler = true;
         }
     }
 }

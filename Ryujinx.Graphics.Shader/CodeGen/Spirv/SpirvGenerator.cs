@@ -50,22 +50,30 @@ namespace Ryujinx.Graphics.Shader.CodeGen.Spirv
             CodeGenContext context = new CodeGenContext(info, config, instPool, integerPool);
 
             context.AddCapability(Capability.GroupNonUniformBallot);
+            context.AddCapability(Capability.GroupNonUniformShuffle);
+            context.AddCapability(Capability.GroupNonUniformVote);
             context.AddCapability(Capability.ImageBuffer);
             context.AddCapability(Capability.ImageGatherExtended);
             context.AddCapability(Capability.ImageQuery);
             context.AddCapability(Capability.SampledBuffer);
-            context.AddCapability(Capability.SubgroupBallotKHR);
-            context.AddCapability(Capability.SubgroupVoteKHR);
 
             if (config.TransformFeedbackEnabled && config.LastInVertexPipeline)
             {
                 context.AddCapability(Capability.TransformFeedback);
             }
 
-            if (config.Stage == ShaderStage.Fragment && context.Config.GpuAccessor.QueryHostSupportsFragmentShaderInterlock())
+            if (config.Stage == ShaderStage.Fragment)
             {
-                context.AddCapability(Capability.FragmentShaderPixelInterlockEXT);
-                context.AddExtension("SPV_EXT_fragment_shader_interlock");
+                if (context.Info.Inputs.Contains(AttributeConsts.Layer))
+                {
+                    context.AddCapability(Capability.Geometry);
+                }
+
+                if (context.Config.GpuAccessor.QueryHostSupportsFragmentShaderInterlock())
+                {
+                    context.AddCapability(Capability.FragmentShaderPixelInterlockEXT);
+                    context.AddExtension("SPV_EXT_fragment_shader_interlock");
+                }
             }
             else if (config.Stage == ShaderStage.Geometry)
             {
@@ -81,9 +89,21 @@ namespace Ryujinx.Graphics.Shader.CodeGen.Spirv
             {
                 context.AddCapability(Capability.Tessellation);
             }
+            else if (config.Stage == ShaderStage.Vertex)
+            {
+                context.AddCapability(Capability.DrawParameters);
+            }
 
-            context.AddExtension("SPV_KHR_shader_ballot");
-            context.AddExtension("SPV_KHR_subgroup_vote");
+            if (config.BindlessTextureFlags != BindlessTextureFlags.None)
+            {
+                context.AddExtension("SPV_EXT_descriptor_indexing");
+                context.AddCapability(Capability.Sampled1D);
+                context.AddCapability(Capability.Image1D);
+                context.AddCapability(Capability.SampledCubeArray);
+                context.AddCapability(Capability.ImageCubeArray);
+                context.AddCapability(Capability.StorageImageMultisample);
+                context.AddCapability(Capability.RuntimeDescriptorArray);
+            }
 
             Declarations.DeclareAll(context, info);
 
@@ -95,13 +115,13 @@ namespace Ryujinx.Graphics.Shader.CodeGen.Spirv
             for (int funcIndex = 0; funcIndex < info.Functions.Count; funcIndex++)
             {
                 var function = info.Functions[funcIndex];
-                var retType = context.GetType(function.ReturnType.Convert());
+                var retType = context.GetType(function.ReturnType);
 
                 var funcArgs = new SpvInstruction[function.InArguments.Length + function.OutArguments.Length];
 
                 for (int argIndex = 0; argIndex < funcArgs.Length; argIndex++)
                 {
-                    var argType = context.GetType(function.GetArgumentType(argIndex).Convert());
+                    var argType = context.GetType(function.GetArgumentType(argIndex));
                     var argPointerType = context.TypePointer(StorageClass.Function, argType);
                     funcArgs[argIndex] = argPointerType;
                 }
@@ -191,7 +211,15 @@ namespace Ryujinx.Graphics.Shader.CodeGen.Spirv
                             break;
                     }
 
-                    if (context.Config.GpuAccessor.QueryTessCw())
+                    bool tessCw = context.Config.GpuAccessor.QueryTessCw();
+
+                    if (context.Config.Options.TargetApi == TargetApi.Vulkan)
+                    {
+                        // We invert the front face on Vulkan backend, so we need to do that here aswell.
+                        tessCw = !tessCw;
+                    }
+
+                    if (tessCw)
                     {
                         context.AddExecutionMode(spvFunc, ExecutionMode.VertexOrderCw);
                     }
@@ -370,14 +398,15 @@ namespace Ryujinx.Graphics.Shader.CodeGen.Spirv
 
                     if (dest.Type == OperandType.LocalVariable)
                     {
-                        var source = context.Get(dest.VarType.Convert(), assignment.Source);
+                        var source = context.Get(dest.VarType, assignment.Source);
                         context.Store(context.GetLocalPointer(dest), source);
                     }
                     else if (dest.Type == OperandType.Attribute || dest.Type == OperandType.AttributePerPatch)
                     {
-                        if (AttributeInfo.Validate(context.Config, dest.Value, isOutAttr: true))
+                        bool perPatch = dest.Type == OperandType.AttributePerPatch;
+
+                        if (AttributeInfo.Validate(context.Config, dest.Value, isOutAttr: true, perPatch))
                         {
-                            bool perPatch = dest.Type == OperandType.AttributePerPatch;
                             AggregateType elemType;
 
                             var elemPointer = perPatch
@@ -389,7 +418,7 @@ namespace Ryujinx.Graphics.Shader.CodeGen.Spirv
                     }
                     else if (dest.Type == OperandType.Argument)
                     {
-                        var source = context.Get(dest.VarType.Convert(), assignment.Source);
+                        var source = context.Get(dest.VarType, assignment.Source);
                         context.Store(context.GetArgumentPointer(dest), source);
                     }
                     else

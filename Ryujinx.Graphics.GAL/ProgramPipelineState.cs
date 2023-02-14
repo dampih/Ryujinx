@@ -6,7 +6,7 @@ namespace Ryujinx.Graphics.GAL
     /// <summary>
     /// Descriptor for a pipeline buffer binding.
     /// </summary>
-    public struct BufferPipelineDescriptor
+    public readonly struct BufferPipelineDescriptor
     {
         public bool Enable { get; }
         public int Stride { get; }
@@ -66,7 +66,7 @@ namespace Ryujinx.Graphics.GAL
         public void SetVertexAttribs(ReadOnlySpan<VertexAttribDescriptor> vertexAttribs)
         {
             VertexAttribCount = vertexAttribs.Length;
-            vertexAttribs.CopyTo(VertexAttribs.ToSpan());
+            vertexAttribs.CopyTo(VertexAttribs.AsSpan());
         }
 
         public void SetLogicOpState(bool enable, LogicalOp op)

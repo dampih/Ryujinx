@@ -1,4 +1,5 @@
-﻿using Ryujinx.Graphics.GAL.Multithreading.Commands.Texture;
+﻿using Ryujinx.Common.Memory;
+using Ryujinx.Graphics.GAL.Multithreading.Commands.Texture;
 using Ryujinx.Graphics.GAL.Multithreading.Model;
 using System;
 
@@ -71,7 +72,7 @@ namespace Ryujinx.Graphics.GAL.Multithreading.Resources
             return newTex;
         }
 
-        public ReadOnlySpan<byte> GetData()
+        public PinnedSpan<byte> GetData()
         {
             if (_renderer.IsGpuThread())
             {
@@ -79,7 +80,7 @@ namespace Ryujinx.Graphics.GAL.Multithreading.Resources
                 _renderer.New<TextureGetDataCommand>().Set(Ref(this), Ref(box));
                 _renderer.InvokeCommand();
 
-                return box.Result.Get();
+                return box.Result;
             }
             else
             {
@@ -89,7 +90,7 @@ namespace Ryujinx.Graphics.GAL.Multithreading.Resources
             }
         }
 
-        public ReadOnlySpan<byte> GetData(int layer, int level)
+        public PinnedSpan<byte> GetData(int layer, int level)
         {
             if (_renderer.IsGpuThread())
             {
@@ -97,7 +98,7 @@ namespace Ryujinx.Graphics.GAL.Multithreading.Resources
                 _renderer.New<TextureGetDataSliceCommand>().Set(Ref(this), Ref(box), layer, level);
                 _renderer.InvokeCommand();
 
-                return box.Result.Get();
+                return box.Result;
             }
             else
             {
@@ -107,15 +108,21 @@ namespace Ryujinx.Graphics.GAL.Multithreading.Resources
             }
         }
 
-        public void SetData(ReadOnlySpan<byte> data)
+        public void SetData(SpanOrArray<byte> data)
         {
             _renderer.New<TextureSetDataCommand>().Set(Ref(this), Ref(data.ToArray()));
             _renderer.QueueCommand();
         }
 
-        public void SetData(ReadOnlySpan<byte> data, int layer, int level)
+        public void SetData(SpanOrArray<byte> data, int layer, int level)
         {
             _renderer.New<TextureSetDataSliceCommand>().Set(Ref(this), Ref(data.ToArray()), layer, level);
+            _renderer.QueueCommand();
+        }
+
+        public void SetData(SpanOrArray<byte> data, int layer, int level, Rectangle<int> region)
+        {
+            _renderer.New<TextureSetDataSliceRegionCommand>().Set(Ref(this), Ref(data.ToArray()), layer, level, region);
             _renderer.QueueCommand();
         }
 

@@ -31,15 +31,18 @@ namespace Ryujinx.Graphics.Vulkan
             Length = length;
         }
 
-        public Span<T> ToSpan()
+        public Span<T> AsSpan()
         {
             return new Span<T>(Pointer, Length);
         }
 
         public void Dispose()
         {
-            Marshal.FreeHGlobal((IntPtr)Pointer);
-            Pointer = null;
+            if (Pointer != null)
+            {
+                Marshal.FreeHGlobal((IntPtr)Pointer);
+                Pointer = null;
+            }
         }
     }
 }

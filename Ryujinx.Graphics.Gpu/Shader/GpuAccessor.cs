@@ -114,6 +114,12 @@ namespace Ryujinx.Graphics.Gpu.Shader
         }
 
         /// <inheritdoc/>
+        public AttributeType QueryFragmentOutputType(int location)
+        {
+            return _state.GraphicsState.FragmentOutputTypes[location];
+        }
+
+        /// <inheritdoc/>
         public int QueryComputeLocalSizeX() => _state.ComputeState.LocalSizeX;
 
         /// <inheritdoc/>
@@ -137,6 +143,18 @@ namespace Ryujinx.Graphics.Gpu.Shader
 
             _state.SpecializationState?.RecordConstantBufferUse(_stageIndex, useMask);
             return useMask;
+        }
+
+        /// <inheritdoc/>
+        public bool QueryHasConstantBufferDrawParameters()
+        {
+            return _state.GraphicsState.HasConstantBufferDrawParameters;
+        }
+
+        /// <inheritdoc/>
+        public bool QueryHasUnalignedStorageBuffer()
+        {
+            return _state.GraphicsState.HasUnalignedStorageBuffer || _state.ComputeState.HasUnalignedStorageBuffer;
         }
 
         /// <inheritdoc/>
