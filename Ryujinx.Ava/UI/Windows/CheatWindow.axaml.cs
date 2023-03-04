@@ -17,6 +17,7 @@ namespace Ryujinx.Ava.UI.Windows
         private AvaloniaList<CheatsList> LoadedCheats { get; }
 
         public string Heading { get; }
+        public string BuildId { get; }
 
         public CheatWindow()
         {
@@ -27,12 +28,12 @@ namespace Ryujinx.Ava.UI.Windows
             Title = $"Ryujinx {Program.Version} - " + LocaleManager.Instance[LocaleKeys.CheatWindowTitle];
         }
 
-        public CheatWindow(VirtualFileSystem virtualFileSystem, string titleId, string titleName)
+        public CheatWindow(VirtualFileSystem virtualFileSystem, string titleId, string titleName, string gameBuildId)
         {
             LoadedCheats = new AvaloniaList<CheatsList>();
 
             Heading = LocaleManager.Instance.UpdateAndGetDynamicValue(LocaleKeys.CheatWindowHeading, titleName, titleId.ToUpper());
-
+            BuildId = $"BID: {gameBuildId}";
             InitializeComponent();
 
             string modsBasePath = virtualFileSystem.ModLoader.GetModsBasePath();
