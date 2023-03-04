@@ -1,4 +1,3 @@
-using Ryujinx.Common.Logging;
 using Ryujinx.Cpu.Tracking;
 using Ryujinx.Graphics.GAL;
 using Ryujinx.Memory.Range;
@@ -15,6 +14,7 @@ namespace Ryujinx.Graphics.Gpu.Memory
     class Buffer : IRange, IDisposable
     {
         private const ulong GranularBufferThreshold = 4096;
+        private const ulong VolatileClearFrames = 30;
 
         private readonly GpuContext _context;
         private readonly PhysicalMemory _physicalMemory;
@@ -62,9 +62,12 @@ namespace Ryujinx.Graphics.Gpu.Memory
         private readonly Action<ulong, ulong> _modifiedDelegate;
 
         private int _sequenceNumber;
+        private ulong _volatileFrameNumber;
 
         private bool _useGranular;
         private bool _syncActionRegistered;
+
+        private int _referenceCount = 1;
 
         /// <summary>
         /// Creates a new instance of the buffer.
@@ -81,7 +84,7 @@ namespace Ryujinx.Graphics.Gpu.Memory
             Address         = address;
             Size            = size;
 
-            Handle = context.Renderer.CreateBuffer((int)size);
+            Handle = context.Renderer.CreateBuffer((int)size, baseBuffers?.MaxBy(x => x.Size).Handle ?? BufferHandle.Null);
 
             _useGranular = size > GranularBufferThreshold;
 
@@ -104,13 +107,13 @@ namespace Ryujinx.Graphics.Gpu.Memory
 
             if (_useGranular)
             {
-                _memoryTrackingGranular = physicalMemory.BeginGranularTracking(address, size, baseHandles);
+                _memoryTrackingGranular = physicalMemory.BeginGranularTracking(address, size, ResourceKind.Buffer, baseHandles);
 
                 _memoryTrackingGranular.RegisterPreciseAction(address, size, PreciseAction);
             }
             else
             {
-                _memoryTracking = physicalMemory.BeginTracking(address, size);
+                _memoryTracking = physicalMemory.BeginTracking(address, size, ResourceKind.Buffer);
 
                 if (baseHandles != null)
                 {
@@ -133,6 +136,8 @@ namespace Ryujinx.Graphics.Gpu.Memory
             _externalFlushDelegate = new RegionSignal(ExternalFlush);
             _loadDelegate = new Action<ulong, ulong>(LoadRegion);
             _modifiedDelegate = new Action<ulong, ulong>(RegionModified);
+
+            _volatileFrameNumber = _context.FrameNumber;
         }
 
         /// <summary>
@@ -230,7 +235,7 @@ namespace Ryujinx.Graphics.Gpu.Memory
         {
             if (_modifiedRanges == null)
             {
-                _modifiedRanges = new BufferModifiedRangeList(_context);
+                _modifiedRanges = new BufferModifiedRangeList(_context, this, Flush);
             }
         }
 
@@ -263,6 +268,44 @@ namespace Ryujinx.Graphics.Gpu.Memory
         }
 
         /// <summary>
+        /// Clears volatile flags on a rotation based on frame number.
+        /// </summary>
+        public void ClearVolatile()
+        {
+            ulong lastClear = _volatileFrameNumber / VolatileClearFrames;
+            ulong newClear = _context.FrameNumber / VolatileClearFrames;
+            ulong clearCount = newClear - lastClear;
+
+            int bits = clearCount > 64 ? 64 : (int)clearCount;
+
+            ulong mask = ulong.MaxValue >> (64 - bits);
+
+            ClearVolatile(mask, (int)lastClear & 63);
+
+            _volatileFrameNumber = _context.FrameNumber;
+            
+        }
+
+        /// <summary>
+        /// Clears volatile flags on this buffer's tracking handles, when they match the mask.
+        /// </summary>
+        /// <param name="mask">A mask indicating pages to clear volatile from</param>
+        /// <param name="offset">An offset to rotate the mask left by</param>
+        private void ClearVolatile(ulong mask, int offset)
+        {
+            int pageNum = ((int)(Address >> MemoryManager.PtPageBits) + (64 - offset)) & 63;
+
+            if (_useGranular)
+            {
+                _memoryTrackingGranular.ClearVolatile((mask >> pageNum) | (mask << (64 - pageNum)));
+            }
+            else if (((mask >> pageNum) & 1) == 1)
+            {
+                _memoryTracking.ClearVolatile();
+            }
+        }
+
+        /// <summary>
         /// Action to be performed when a syncpoint is reached after modification.
         /// This will register read/write tracking to flush the buffer from GPU when its memory is used.
         /// </summary>
@@ -291,7 +334,7 @@ namespace Ryujinx.Graphics.Gpu.Memory
         /// <param name="from">The buffer to inherit from</param>
         public void InheritModifiedRanges(Buffer from)
         {
-            if (from._modifiedRanges != null)
+            if (from._modifiedRanges != null && from._modifiedRanges.HasRanges)
             {
                 if (from._syncActionRegistered && !_syncActionRegistered)
                 {
@@ -311,17 +354,9 @@ namespace Ryujinx.Graphics.Gpu.Memory
                     }
                 };
 
-                if (_modifiedRanges == null)
-                {
-                    _modifiedRanges = from._modifiedRanges;
-                    _modifiedRanges.ReregisterRanges(registerRangeAction);
+                EnsureRangeList();
 
-                    from._modifiedRanges = null;
-                }
-                else
-                {
-                    _modifiedRanges.InheritRanges(from._modifiedRanges, registerRangeAction);
-                }
+                _modifiedRanges.InheritRanges(from._modifiedRanges, registerRangeAction);
             }
         }
 
@@ -377,6 +412,11 @@ namespace Ryujinx.Graphics.Gpu.Memory
         /// <param name="mSize">Size of the modified region</param>
         private void LoadRegion(ulong mAddress, ulong mSize)
         {
+            if (_context.FrameNumber - _volatileFrameNumber >= VolatileClearFrames)
+            {
+                ClearVolatile();
+            }
+
             int offset = (int)(mAddress - Address);
 
             _context.Renderer.SetBufferData(Handle, offset, _physicalMemory.GetSpan(mAddress, (int)mSize));
@@ -422,10 +462,10 @@ namespace Ryujinx.Graphics.Gpu.Memory
         {
             int offset = (int)(address - Address);
 
-            ReadOnlySpan<byte> data = _context.Renderer.GetBufferData(Handle, offset, (int)size);
+            using PinnedSpan<byte> data = _context.Renderer.GetBufferData(Handle, offset, (int)size);
 
             // TODO: When write tracking shaders, they will need to be aware of changes in overlapping buffers.
-            _physicalMemory.WriteUntracked(address, data);
+            _physicalMemory.WriteUntracked(address, data.Get());
         }
 
         /// <summary>
@@ -457,7 +497,7 @@ namespace Ryujinx.Graphics.Gpu.Memory
                 if (ranges != null)
                 {
                     (address, size) = PageAlign(address, size);
-                    ranges.WaitForAndGetRanges(address, size, Flush);
+                    ranges.WaitForAndFlushRanges(address, size);
                 }
             }, true);
         }
@@ -477,19 +517,16 @@ namespace Ryujinx.Graphics.Gpu.Memory
                 return false;
             }
 
-            if (address < Address)
+            ulong maxAddress = Math.Max(address, Address);
+            ulong minEndAddress = Math.Min(address + size, Address + Size);
+
+            if (maxAddress >= minEndAddress)
             {
-                address = Address;
+                // Access doesn't overlap.
+                return false;
             }
 
-            ulong maxSize = Address + Size - address;
-
-            if (size > maxSize)
-            {
-                size = maxSize;
-            }
-
-            ForceDirty(address, size);
+            ForceDirty(maxAddress, minEndAddress - maxAddress);
 
             return true;
         }
@@ -507,6 +544,25 @@ namespace Ryujinx.Graphics.Gpu.Memory
             modifiedRanges?.Clear(address, size);
 
             UnmappedSequence++;
+        }
+
+        /// <summary>
+        /// Increments the buffer reference count.
+        /// </summary>
+        public void IncrementReferenceCount()
+        {
+            _referenceCount++;
+        }
+
+        /// <summary>
+        /// Decrements the buffer reference count.
+        /// </summary>
+        public void DecrementReferenceCount()
+        {
+            if (--_referenceCount == 0)
+            {
+                DisposeData();
+            }
         }
 
         /// <summary>
@@ -529,7 +585,7 @@ namespace Ryujinx.Graphics.Gpu.Memory
             _memoryTrackingGranular?.Dispose();
             _memoryTracking?.Dispose();
 
-            DisposeData();
+            DecrementReferenceCount();
         }
     }
 }

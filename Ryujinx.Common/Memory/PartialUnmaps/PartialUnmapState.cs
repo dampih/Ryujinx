@@ -1,6 +1,7 @@
 ﻿using System;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
+using System.Runtime.InteropServices.Marshalling;
 using System.Runtime.Versioning;
 using System.Threading;
 
@@ -12,7 +13,7 @@ namespace Ryujinx.Common.Memory.PartialUnmaps
     /// State for partial unmaps. Intended to be used on Windows.
     /// </summary>
     [StructLayout(LayoutKind.Sequential, Pack = 1)]
-    public struct PartialUnmapState
+    public partial struct PartialUnmapState
     {
         public NativeReaderWriterLock PartialUnmapLock;
         public int PartialUnmapsCount;
@@ -25,20 +26,22 @@ namespace Ryujinx.Common.Memory.PartialUnmaps
         public readonly static IntPtr GlobalState;
 
         [SupportedOSPlatform("windows")]
-        [DllImport("kernel32.dll")]
-        public static extern int GetCurrentThreadId();
+        [LibraryImport("kernel32.dll")]
+        private static partial int GetCurrentThreadId();
 
         [SupportedOSPlatform("windows")]
-        [DllImport("kernel32.dll", SetLastError = true)]
-        static extern IntPtr OpenThread(int dwDesiredAccess, bool bInheritHandle, uint dwThreadId);
+        [LibraryImport("kernel32.dll", SetLastError = true)]
+        private static partial IntPtr OpenThread(int dwDesiredAccess, [MarshalAs(UnmanagedType.Bool)] bool bInheritHandle, uint dwThreadId);
 
         [SupportedOSPlatform("windows")]
-        [DllImport("kernel32.dll", SetLastError = true)]
-        public static extern bool CloseHandle(IntPtr hObject);
+        [LibraryImport("kernel32.dll", SetLastError = true)]
+        [return: MarshalAs (UnmanagedType.Bool)]
+        private static partial bool CloseHandle(IntPtr hObject);
 
         [SupportedOSPlatform("windows")]
-        [DllImport("kernel32.dll", SetLastError = true)]
-        static extern bool GetExitCodeThread(IntPtr hThread, out uint lpExitCode);
+        [LibraryImport("kernel32.dll", SetLastError = true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        private static partial bool GetExitCodeThread(IntPtr hThread, out uint lpExitCode);
 
         /// <summary>
         /// Creates a global static PartialUnmapState and populates the field offsets.
@@ -83,7 +86,7 @@ namespace Ryujinx.Common.Memory.PartialUnmaps
         /// memory might be accessed but is unmapped. Users of the API must compensate for that by catching the
         /// access violation and retrying if it happened between the unmap and remap operation.
         /// This method can be used to decide if retrying in such cases is necessary or not.
-        /// 
+        ///
         /// This version of the function is not used, but serves as a reference for the native
         /// implementation in ARMeilleure.
         /// </remarks>
@@ -128,12 +131,12 @@ namespace Ryujinx.Common.Memory.PartialUnmaps
             const uint ExitCodeStillActive = 259;
             const int ThreadQueryInformation = 0x40;
 
-            Span<int> ids = LocalCounts.ThreadIds.ToSpan();
+            Span<int> ids = LocalCounts.ThreadIds.AsSpan();
 
             for (int i = 0; i < ids.Length; i++)
             {
                 int id = ids[i];
-                
+
                 if (id != 0)
                 {
                     IntPtr handle = OpenThread(ThreadQueryInformation, false, (uint)id);

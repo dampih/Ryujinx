@@ -5,6 +5,7 @@ using Ryujinx.Graphics.Gpu.Engine.Types;
 using Ryujinx.Graphics.Gpu.Image;
 using Ryujinx.Graphics.Shader;
 using System;
+using System.Runtime.CompilerServices;
 
 namespace Ryujinx.Graphics.Gpu.Engine.Threed
 {
@@ -215,6 +216,17 @@ namespace Ryujinx.Graphics.Gpu.Engine.Threed
     }
 
     /// <summary>
+    /// Indicates whenever the blend microcode processes RGB and alpha components.
+    /// </summary>
+    enum BlendUcodeEnable
+    {
+        Disabled = 0,
+        EnableRGB = 1,
+        EnableAlpha = 2,
+        EnableRGBA = 3
+    }
+
+    /// <summary>
     /// Scissor state.
     /// </summary>
     struct ScissorState
@@ -268,6 +280,41 @@ namespace Ryujinx.Graphics.Gpu.Engine.Threed
     }
 
     /// <summary>
+    /// Vertex attribute vector and component size.
+    /// </summary>
+    enum VertexAttribSize
+    {
+        Size32x4 = 1,
+        Size32x3 = 2,
+        Size16x4 = 3,
+        Size32x2 = 4,
+        Size16x3 = 5,
+        Size8x4 = 0xa,
+        Size16x2 = 0xf,
+        Size32 = 0x12,
+        Size8x3 = 0x13,
+        Size8x2 = 0x18,
+        Size16 = 0x1b,
+        Size8 = 0x1d,
+        Rgb10A2 = 0x30,
+        Rg11B10 = 0x31
+    }
+
+    /// <summary>
+    /// Vertex attribute component type.
+    /// </summary>
+    enum VertexAttribType
+    {
+        Snorm = 1,
+        Unorm = 2,
+        Sint = 3,
+        Uint = 4,
+        Uscaled = 5,
+        Sscaled = 6,
+        Float = 7
+    }
+
+    /// <summary>
     /// Vertex buffer attribute state.
     /// </summary>
     struct VertexAttribState
@@ -312,13 +359,22 @@ namespace Ryujinx.Graphics.Gpu.Engine.Threed
             return Attribute & 0x3fe00000;
         }
 
-         /// <summary>
+        /// <summary>
+        /// Unpacks the Maxwell attribute size.
+        /// </summary>
+        /// <returns>Attribute size</returns>
+        public VertexAttribSize UnpackSize()
+        {
+            return (VertexAttribSize)((Attribute >> 21) & 0x3f);
+        }
+
+        /// <summary>
         /// Unpacks the Maxwell attribute component type.
         /// </summary>
         /// <returns>Attribute component type</returns>
-        public uint UnpackType()
+        public VertexAttribType UnpackType()
         {
-            return (Attribute >> 27) & 7;
+            return (VertexAttribType)((Attribute >> 27) & 7);
         }
     }
 
@@ -388,6 +444,49 @@ namespace Ryujinx.Graphics.Gpu.Engine.Threed
     {
         NegateY = 1 << 0,
         TriangleRastFlip = 1 << 4
+    }
+
+    /// <summary>
+    /// RGB color components packed as 16-bit float values.
+    /// </summary>
+    struct RgbHalf
+    {
+#pragma warning disable CS0649
+        public uint R;
+        public uint G;
+        public uint B;
+        public uint Padding;
+#pragma warning restore CS0649
+
+        /// <summary>
+        /// Unpacks the red color component as a 16-bit float value.
+        /// </summary>
+        /// <returns>The component value</returns>
+        public Half UnpackR()
+        {
+            ushort value = (ushort)R;
+            return Unsafe.As<ushort, Half>(ref value);
+        }
+
+        /// <summary>
+        /// Unpacks the green color component as a 16-bit float value.
+        /// </summary>
+        /// <returns>The component value</returns>
+        public Half UnpackG()
+        {
+            ushort value = (ushort)G;
+            return Unsafe.As<ushort, Half>(ref value);
+        }
+
+        /// <summary>
+        /// Unpacks the blue color component as a 16-bit float value.
+        /// </summary>
+        /// <returns>The component value</returns>
+        public Half UnpackB()
+        {
+            ushort value = (ushort)B;
+            return Unsafe.As<ushort, Half>(ref value);
+        }
     }
 
     /// <summary>
@@ -708,7 +807,9 @@ namespace Ryujinx.Graphics.Gpu.Engine.Threed
         public Boolean32 EarlyZForce;
         public fixed uint Reserved214[45];
         public uint SyncpointAction;
-        public fixed uint Reserved2CC[21];
+        public fixed uint Reserved2CC[10];
+        public uint BlendUcodeNormalizedDst;
+        public fixed uint Reserved2F8[10];
         public TessMode TessMode;
         public Array4<float> TessOuterLevel;
         public Array2<float> TessInnerLevel;
@@ -737,11 +838,16 @@ namespace Ryujinx.Graphics.Gpu.Engine.Threed
         public fixed uint ReservedDB8[2];
         public DepthBiasState DepthBiasState;
         public int PatchVertices;
-        public fixed uint ReservedDD0[4];
+        public BlendUcodeEnable BlendUcodeEnable;
+        public uint BlendUcodeSize;
+        public fixed uint ReservedDD8[2];
         public uint TextureBarrier;
         public uint WatchdogTimer;
         public Boolean32 PrimitiveRestartDrawArrays;
-        public fixed uint ReservedDEC[5];
+        public uint ReservedDEC;
+        public uint LoadBlendUcodeStart;
+        public uint LoadBlendUcodeInstruction;
+        public fixed uint ReservedDF8[2];
         public Array16<ScissorState> ScissorState;
         public fixed uint ReservedF00[21];
         public StencilBackMasks StencilBackMasks;
@@ -769,7 +875,9 @@ namespace Ryujinx.Graphics.Gpu.Engine.Threed
         public uint ClearFlags;
         public fixed uint Reserved10FC[25];
         public Array32<VertexAttribState> VertexAttribState;
-        public fixed uint Reserved11E0[15];
+        public fixed uint Reserved11E0[13];
+        public uint DrawVertexArrayBeginEndInstanceFirst;
+        public uint DrawVertexArrayBeginEndInstanceSubsequent;
         public RtControl RtControl;
         public fixed uint Reserved1220[2];
         public Size3D RtDepthStencilSize;
@@ -804,7 +912,9 @@ namespace Ryujinx.Graphics.Gpu.Engine.Threed
         public fixed uint Reserved142C[2];
         public uint FirstVertex;
         public uint FirstInstance;
-        public fixed uint Reserved143C[53];
+        public fixed uint Reserved143C[17];
+        public Array8<RgbHalf> BlendUcodeConstants;
+        public fixed uint Reserved1500[4];
         public uint ClipDistanceEnable;
         public uint Reserved1514;
         public float PointSize;
@@ -844,12 +954,13 @@ namespace Ryujinx.Graphics.Gpu.Engine.Threed
         public fixed uint Reserved164C[95];
         public IndexBufferState IndexBufferState;
         public uint IndexBufferCount;
-        public uint DrawIndexedSmall;
-        public uint DrawIndexedSmall2;
-        public uint Reserved17EC;
-        public uint DrawIndexedSmallIncInstance;
-        public uint DrawIndexedSmallIncInstance2;
-        public fixed uint Reserved17F8[33];
+        public uint DrawIndexBuffer32BeginEndInstanceFirst;
+        public uint DrawIndexBuffer16BeginEndInstanceFirst;
+        public uint DrawIndexBuffer8BeginEndInstanceFirst;
+        public uint DrawIndexBuffer32BeginEndInstanceSubsequent;
+        public uint DrawIndexBuffer16BeginEndInstanceSubsequent;
+        public uint DrawIndexBuffer8BeginEndInstanceSubsequent;
+        public fixed uint Reserved17FC[32];
         public float DepthBiasClamp;
         public Array16<Boolean32> VertexBufferInstanced;
         public fixed uint Reserved18C0[20];

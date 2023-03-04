@@ -4,14 +4,14 @@ using System;
 
 namespace Ryujinx.Graphics.GAL.Multithreading.Commands.Window
 {
-    struct WindowPresentCommand : IGALCommand
+    struct WindowPresentCommand : IGALCommand, IGALCommand<WindowPresentCommand>
     {
         public CommandType CommandType => CommandType.WindowPresent;
         private TableRef<ThreadedTexture> _texture;
         private ImageCrop _crop;
-        private TableRef<Action<object>> _swapBuffersCallback;
+        private TableRef<Action> _swapBuffersCallback;
 
-        public void Set(TableRef<ThreadedTexture> texture, ImageCrop crop, TableRef<Action<object>> swapBuffersCallback)
+        public void Set(TableRef<ThreadedTexture> texture, ImageCrop crop, TableRef<Action> swapBuffersCallback)
         {
             _texture = texture;
             _crop = crop;

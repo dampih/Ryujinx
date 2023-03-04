@@ -110,7 +110,7 @@ namespace Ryujinx.Graphics.Gpu.Shader
             /// <summary>
             /// Texture target.
             /// </summary>
-            public Image.TextureTarget TextureTarget;
+            public TextureTarget TextureTarget;
 
             /// <summary>
             /// Indicates if the coordinates used to sample the texture are normalized or not (0.0..1.0 or 0..Width/Height).
@@ -121,7 +121,7 @@ namespace Ryujinx.Graphics.Gpu.Shader
         /// <summary>
         /// Texture binding information, used to identify each texture accessed by the shader.
         /// </summary>
-        private struct TextureKey : IEquatable<TextureKey>
+        private readonly record struct TextureKey
         {
             // New fields should be added to the end of the struct to keep disk shader cache compatibility.
 
@@ -151,21 +151,6 @@ namespace Ryujinx.Graphics.Gpu.Shader
                 StageIndex = stageIndex;
                 Handle = handle;
                 CbufSlot = cbufSlot;
-            }
-
-            public override bool Equals(object obj)
-            {
-                return obj is TextureKey textureKey && Equals(textureKey);
-            }
-
-            public bool Equals(TextureKey other)
-            {
-                return StageIndex == other.StageIndex && Handle == other.Handle && CbufSlot == other.CbufSlot;
-            }
-
-            public override int GetHashCode()
-            {
-                return HashCode.Combine(StageIndex, Handle, CbufSlot);
             }
         }
 
@@ -346,7 +331,7 @@ namespace Ryujinx.Graphics.Gpu.Shader
             int cbufSlot,
             uint format,
             bool formatSrgb,
-            Image.TextureTarget target,
+            TextureTarget target,
             bool coordNormalized)
         {
             Box<TextureSpecializationState> state = GetOrCreateTextureSpecState(stageIndex, handle, cbufSlot);
@@ -393,6 +378,15 @@ namespace Ryujinx.Graphics.Gpu.Shader
         }
 
         /// <summary>
+        /// Checks if primitive topology was queried by the shader.
+        /// </summary>
+        /// <returns>True if queried, false otherwise</returns>
+        public bool IsPrimitiveTopologyQueried()
+        {
+            return _queriedState.HasFlag(QueriedStateFlags.PrimitiveTopology);
+        }
+
+        /// <summary>
         /// Checks if a given texture was registerd on this specialization state.
         /// </summary>
         /// <param name="stageIndex">Shader stage where the texture is used</param>
@@ -421,7 +415,7 @@ namespace Ryujinx.Graphics.Gpu.Shader
         /// <param name="stageIndex">Shader stage where the texture is used</param>
         /// <param name="handle">Offset in words of the texture handle on the texture buffer</param>
         /// <param name="cbufSlot">Slot of the texture buffer constant buffer</param>
-        public Image.TextureTarget GetTextureTarget(int stageIndex, int handle, int cbufSlot)
+        public TextureTarget GetTextureTarget(int stageIndex, int handle, int cbufSlot)
         {
             return GetTextureSpecState(stageIndex, handle, cbufSlot).Value.TextureTarget;
         }
@@ -481,9 +475,15 @@ namespace Ryujinx.Graphics.Gpu.Shader
         /// <param name="channel">GPU channel</param>
         /// <param name="poolState">Texture pool state</param>
         /// <param name="graphicsState">Graphics state</param>
+        /// <param name="usesDrawParameters">Indicates whether the vertex shader accesses draw parameters</param>
         /// <param name="checkTextures">Indicates whether texture descriptors should be checked</param>
         /// <returns>True if the state matches, false otherwise</returns>
-        public bool MatchesGraphics(GpuChannel channel, GpuChannelPoolState poolState, GpuChannelGraphicsState graphicsState, bool checkTextures)
+        public bool MatchesGraphics(
+            GpuChannel channel,
+            ref GpuChannelPoolState poolState,
+            ref GpuChannelGraphicsState graphicsState,
+            bool usesDrawParameters,
+            bool checkTextures)
         {
             if (graphicsState.ViewportTransformDisable != GraphicsState.ViewportTransformDisable)
             {
@@ -515,12 +515,27 @@ namespace Ryujinx.Graphics.Gpu.Shader
                 return false;
             }
 
-            if (!graphicsState.AttributeTypes.ToSpan().SequenceEqual(GraphicsState.AttributeTypes.ToSpan()))
+            if (!graphicsState.AttributeTypes.AsSpan().SequenceEqual(GraphicsState.AttributeTypes.AsSpan()))
             {
                 return false;
             }
 
-            return Matches(channel, poolState, checkTextures, isCompute: false);
+            if (usesDrawParameters && graphicsState.HasConstantBufferDrawParameters != GraphicsState.HasConstantBufferDrawParameters)
+            {
+                return false;
+            }
+
+            if (graphicsState.HasUnalignedStorageBuffer != GraphicsState.HasUnalignedStorageBuffer)
+            {
+                return false;
+            }
+
+            if (channel.Capabilities.NeedsFragmentOutputSpecialization && !graphicsState.FragmentOutputTypes.AsSpan().SequenceEqual(GraphicsState.FragmentOutputTypes.AsSpan()))
+            {
+                return false;
+            }
+
+            return Matches(channel, ref poolState, checkTextures, isCompute: false);
         }
 
         /// <summary>
@@ -528,11 +543,17 @@ namespace Ryujinx.Graphics.Gpu.Shader
         /// </summary>
         /// <param name="channel">GPU channel</param>
         /// <param name="poolState">Texture pool state</param>
+        /// <param name="computeState">Compute state</param>
         /// <param name="checkTextures">Indicates whether texture descriptors should be checked</param>
         /// <returns>True if the state matches, false otherwise</returns>
-        public bool MatchesCompute(GpuChannel channel, GpuChannelPoolState poolState, bool checkTextures)
+        public bool MatchesCompute(GpuChannel channel, ref GpuChannelPoolState poolState, GpuChannelComputeState computeState, bool checkTextures)
         {
-            return Matches(channel, poolState, checkTextures, isCompute: true);
+            if (computeState.HasUnalignedStorageBuffer != ComputeState.HasUnalignedStorageBuffer)
+            {
+                return false;
+            }
+
+            return Matches(channel, ref poolState, checkTextures, isCompute: true);
         }
 
         /// <summary>
@@ -552,11 +573,11 @@ namespace Ryujinx.Graphics.Gpu.Shader
         private static void UpdateCachedBuffer(
             GpuChannel channel,
             bool isCompute,
-            ref int cachedTextureBufferIndex,
-            ref int cachedSamplerBufferIndex,
-            ref ReadOnlySpan<int> cachedTextureBuffer,
-            ref ReadOnlySpan<int> cachedSamplerBuffer,
-            ref int cachedStageIndex,
+            scoped ref int cachedTextureBufferIndex,
+            scoped ref int cachedSamplerBufferIndex,
+            scoped ref ReadOnlySpan<int> cachedTextureBuffer,
+            scoped ref ReadOnlySpan<int> cachedSamplerBuffer,
+            scoped ref int cachedStageIndex,
             int textureBufferIndex,
             int samplerBufferIndex,
             int stageIndex)
@@ -596,7 +617,7 @@ namespace Ryujinx.Graphics.Gpu.Shader
         /// <param name="checkTextures">Indicates whether texture descriptors should be checked</param>
         /// <param name="isCompute">Indicates whenever the check is requested by the 3D or compute engine</param>
         /// <returns>True if the state matches, false otherwise</returns>
-        private bool Matches(GpuChannel channel, GpuChannelPoolState poolState, bool checkTextures, bool isCompute)
+        private bool Matches(GpuChannel channel, ref GpuChannelPoolState poolState, bool checkTextures, bool isCompute)
         {
             int constantBufferUsePerStageMask = _constantBufferUsePerStage;
 

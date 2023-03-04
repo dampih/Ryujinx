@@ -71,8 +71,8 @@ namespace Ryujinx.Graphics.Vulkan
             {
                 SType = StructureType.CommandPoolCreateInfo,
                 QueueFamilyIndex = queueFamilyIndex,
-                Flags = CommandPoolCreateFlags.CommandPoolCreateTransientBit |
-                        CommandPoolCreateFlags.CommandPoolCreateResetCommandBufferBit
+                Flags = CommandPoolCreateFlags.TransientBit |
+                        CommandPoolCreateFlags.ResetCommandBufferBit
             };
 
             api.CreateCommandPool(device, commandPoolCreateInfo, null, out _pool).ThrowOnError();
@@ -109,6 +109,22 @@ namespace Ryujinx.Graphics.Vulkan
                     ref var entry = ref _commandBuffers[i];
 
                     if (entry.InConsumption)
+                    {
+                        AddWaitable(i, waitable);
+                    }
+                }
+            }
+        }
+
+        public void AddInUseWaitable(MultiFenceHolder waitable)
+        {
+            lock (_commandBuffers)
+            {
+                for (int i = 0; i < _totalCommandBuffers; i++)
+                {
+                    ref var entry = ref _commandBuffers[i];
+
+                    if (entry.InUse)
                     {
                         AddWaitable(i, waitable);
                     }

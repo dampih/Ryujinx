@@ -10,68 +10,94 @@ namespace Ryujinx.Graphics.Vulkan
     class BufferManager : IDisposable
     {
         private const MemoryPropertyFlags DefaultBufferMemoryFlags =
-            MemoryPropertyFlags.MemoryPropertyHostVisibleBit |
-            MemoryPropertyFlags.MemoryPropertyHostCoherentBit |
-            MemoryPropertyFlags.MemoryPropertyHostCachedBit;
+            MemoryPropertyFlags.HostVisibleBit |
+            MemoryPropertyFlags.HostCoherentBit |
+            MemoryPropertyFlags.HostCachedBit;
+
+        // Some drivers don't expose a "HostCached" memory type,
+        // so we need those alternative flags for the allocation to succeed there.
+        private const MemoryPropertyFlags DefaultBufferMemoryAltFlags =
+            MemoryPropertyFlags.HostVisibleBit |
+            MemoryPropertyFlags.HostCoherentBit;
 
         private const MemoryPropertyFlags DeviceLocalBufferMemoryFlags =
-            MemoryPropertyFlags.MemoryPropertyDeviceLocalBit;
+            MemoryPropertyFlags.DeviceLocalBit;
+
+        private const MemoryPropertyFlags DeviceLocalMappedBufferMemoryFlags =
+            MemoryPropertyFlags.DeviceLocalBit |
+            MemoryPropertyFlags.HostVisibleBit |
+            MemoryPropertyFlags.HostCoherentBit;
 
         private const MemoryPropertyFlags FlushableDeviceLocalBufferMemoryFlags =
-            MemoryPropertyFlags.MemoryPropertyHostVisibleBit |
-            MemoryPropertyFlags.MemoryPropertyHostCoherentBit |
-            MemoryPropertyFlags.MemoryPropertyDeviceLocalBit;
+            MemoryPropertyFlags.HostVisibleBit |
+            MemoryPropertyFlags.HostCoherentBit |
+            MemoryPropertyFlags.DeviceLocalBit;
 
         private const BufferUsageFlags DefaultBufferUsageFlags =
-            BufferUsageFlags.BufferUsageTransferSrcBit |
-            BufferUsageFlags.BufferUsageTransferDstBit |
-            BufferUsageFlags.BufferUsageUniformTexelBufferBit |
-            BufferUsageFlags.BufferUsageStorageTexelBufferBit |
-            BufferUsageFlags.BufferUsageUniformBufferBit |
-            BufferUsageFlags.BufferUsageStorageBufferBit |
-            BufferUsageFlags.BufferUsageIndexBufferBit |
-            BufferUsageFlags.BufferUsageVertexBufferBit |
-            BufferUsageFlags.BufferUsageTransformFeedbackBufferBitExt;
+            BufferUsageFlags.TransferSrcBit |
+            BufferUsageFlags.TransferDstBit |
+            BufferUsageFlags.UniformTexelBufferBit |
+            BufferUsageFlags.StorageTexelBufferBit |
+            BufferUsageFlags.UniformBufferBit |
+            BufferUsageFlags.StorageBufferBit |
+            BufferUsageFlags.IndexBufferBit |
+            BufferUsageFlags.VertexBufferBit |
+            BufferUsageFlags.TransformFeedbackBufferBitExt;
 
-        private readonly PhysicalDevice _physicalDevice;
+        private const int BufferSizeDeviceLocalThreshold = 512 * 1024; // 512kb
+        
         private readonly Device _device;
 
         private readonly IdList<BufferHolder> _buffers;
 
+        public int BufferCount { get; private set; }
+
         public StagingBuffer StagingBuffer { get; }
 
-        public BufferManager(VulkanRenderer gd, PhysicalDevice physicalDevice, Device device)
+        public BufferManager(VulkanRenderer gd, Device device)
         {
-            _physicalDevice = physicalDevice;
             _device = device;
             _buffers = new IdList<BufferHolder>();
             StagingBuffer = new StagingBuffer(gd, this);
         }
 
-        public BufferHandle CreateWithHandle(VulkanRenderer gd, int size, bool deviceLocal)
+        public BufferHandle CreateWithHandle(VulkanRenderer gd, int size, BufferAllocationType baseType = BufferAllocationType.HostMapped, BufferHandle storageHint = default)
         {
-            var holder = Create(gd, size, deviceLocal: deviceLocal);
+            return CreateWithHandle(gd, size, out _, baseType, storageHint);
+        }
+
+        public BufferHandle CreateWithHandle(VulkanRenderer gd, int size, out BufferHolder holder, BufferAllocationType baseType = BufferAllocationType.HostMapped, BufferHandle storageHint = default)
+        {
+            holder = Create(gd, size, baseType: baseType, storageHint: storageHint);
             if (holder == null)
             {
                 return BufferHandle.Null;
             }
+
+            BufferCount++;
 
             ulong handle64 = (uint)_buffers.Add(holder);
 
             return Unsafe.As<ulong, BufferHandle>(ref handle64);
         }
 
-        public unsafe BufferHolder Create(VulkanRenderer gd, int size, bool forConditionalRendering = false, bool deviceLocal = false)
+        public unsafe (Silk.NET.Vulkan.Buffer buffer, MemoryAllocation allocation, BufferAllocationType resultType) CreateBacking(
+            VulkanRenderer gd,
+            int size,
+            BufferAllocationType type,
+            bool forConditionalRendering = false,
+            BufferAllocationType fallbackType = BufferAllocationType.Auto
+            )
         {
             var usage = DefaultBufferUsageFlags;
 
             if (forConditionalRendering && gd.Capabilities.SupportsConditionalRendering)
             {
-                usage |= BufferUsageFlags.BufferUsageConditionalRenderingBitExt;
+                usage |= BufferUsageFlags.ConditionalRenderingBitExt;
             }
             else if (gd.Capabilities.SupportsIndirectParameters)
             {
-                usage |= BufferUsageFlags.BufferUsageIndirectBufferBit;
+                usage |= BufferUsageFlags.IndirectBufferBit;
             }
 
             var bufferCreateInfo = new BufferCreateInfo()
@@ -85,36 +111,102 @@ namespace Ryujinx.Graphics.Vulkan
             gd.Api.CreateBuffer(_device, in bufferCreateInfo, null, out var buffer).ThrowOnError();
             gd.Api.GetBufferMemoryRequirements(_device, buffer, out var requirements);
 
-            var allocateFlags = deviceLocal ? DeviceLocalBufferMemoryFlags : DefaultBufferMemoryFlags;
+            MemoryAllocation allocation;
 
-            var allocation = gd.MemoryAllocator.AllocateDeviceMemory(_physicalDevice, requirements, allocateFlags);
+            do
+            {
+                var allocateFlags = type switch
+                {
+                    BufferAllocationType.HostMapped => DefaultBufferMemoryFlags,
+                    BufferAllocationType.DeviceLocal => DeviceLocalBufferMemoryFlags,
+                    BufferAllocationType.DeviceLocalMapped => DeviceLocalMappedBufferMemoryFlags,
+                    _ => DefaultBufferMemoryFlags
+                };
+
+                // If an allocation with this memory type fails, fall back to the previous one.
+                try
+                {
+                    allocation = gd.MemoryAllocator.AllocateDeviceMemory(requirements, allocateFlags);
+                }
+                catch (VulkanException)
+                {
+                    allocation = default;
+                }
+            }
+            while (allocation.Memory.Handle == 0 && (--type != fallbackType));
 
             if (allocation.Memory.Handle == 0UL)
             {
                 gd.Api.DestroyBuffer(_device, buffer, null);
-                return null;
+                return default;
             }
 
             gd.Api.BindBufferMemory(_device, buffer, allocation.Memory, allocation.Offset);
 
-            return new BufferHolder(gd, _device, buffer, allocation, size);
+            return (buffer, allocation, type);
         }
 
-        public Auto<DisposableBufferView> CreateView(BufferHandle handle, VkFormat format, int offset, int size)
+        public unsafe BufferHolder Create(VulkanRenderer gd, int size, bool forConditionalRendering = false, BufferAllocationType baseType = BufferAllocationType.HostMapped, BufferHandle storageHint = default)
         {
-            if (TryGetBuffer(handle, out var holder))
+            BufferAllocationType type = baseType;
+
+            if (baseType == BufferAllocationType.Auto)
             {
-                return holder.CreateView(format, offset, size);
+                if (gd.IsSharedMemory)
+                {
+                    baseType = BufferAllocationType.HostMapped;
+                    type = baseType;
+                }
+                else
+                {
+                    type = size >= BufferSizeDeviceLocalThreshold ? BufferAllocationType.DeviceLocal : BufferAllocationType.HostMapped;
+                }
+
+                if (storageHint != BufferHandle.Null)
+                {
+                    if (TryGetBuffer(storageHint, out var holder))
+                    {
+                        type = holder.DesiredType;
+                    }
+                }
+            }
+
+            (Silk.NET.Vulkan.Buffer buffer, MemoryAllocation allocation, BufferAllocationType resultType) =
+                CreateBacking(gd, size, type, forConditionalRendering);
+
+            if (buffer.Handle != 0)
+            {
+                return new BufferHolder(gd, _device, buffer, allocation, size, baseType, resultType);
             }
 
             return null;
         }
 
-        public Auto<DisposableBuffer> GetBuffer(CommandBuffer commandBuffer, BufferHandle handle, bool isWrite)
+        public Auto<DisposableBufferView> CreateView(BufferHandle handle, VkFormat format, int offset, int size, Action invalidateView)
         {
             if (TryGetBuffer(handle, out var holder))
             {
-                return holder.GetBuffer(commandBuffer, isWrite);
+                return holder.CreateView(format, offset, size, invalidateView);
+            }
+
+            return null;
+        }
+
+        public Auto<DisposableBuffer> GetBuffer(CommandBuffer commandBuffer, BufferHandle handle, bool isWrite, bool isSSBO = false)
+        {
+            if (TryGetBuffer(handle, out var holder))
+            {
+                return holder.GetBuffer(commandBuffer, isWrite, isSSBO);
+            }
+
+            return null;
+        }
+
+        public Auto<DisposableBuffer> GetBuffer(CommandBuffer commandBuffer, BufferHandle handle, int offset, int size, bool isWrite)
+        {
+            if (TryGetBuffer(handle, out var holder))
+            {
+                return holder.GetBuffer(commandBuffer, offset, size, isWrite);
             }
 
             return null;
@@ -130,6 +222,161 @@ namespace Ryujinx.Graphics.Vulkan
             return null;
         }
 
+        public Auto<DisposableBuffer> GetAlignedVertexBuffer(CommandBufferScoped cbs, BufferHandle handle, int offset, int size, int stride, int alignment)
+        {
+            if (TryGetBuffer(handle, out var holder))
+            {
+                return holder.GetAlignedVertexBuffer(cbs, offset, size, stride, alignment);
+            }
+
+            return null;
+        }
+
+        public Auto<DisposableBuffer> GetBufferTopologyConversion(CommandBufferScoped cbs, BufferHandle handle, int offset, int size, IndexBufferPattern pattern, int indexSize)
+        {
+            if (TryGetBuffer(handle, out var holder))
+            {
+                return holder.GetBufferTopologyConversion(cbs, offset, size, pattern, indexSize);
+            }
+
+            return null;
+        }
+
+        public (Auto<DisposableBuffer>, Auto<DisposableBuffer>) GetBufferTopologyConversionIndirect(
+            VulkanRenderer gd,
+            CommandBufferScoped cbs,
+            BufferRange indexBuffer,
+            BufferRange indirectBuffer,
+            BufferRange drawCountBuffer,
+            IndexBufferPattern pattern,
+            int indexSize,
+            bool hasDrawCount,
+            int maxDrawCount,
+            int indirectDataStride)
+        {
+            BufferHolder drawCountBufferHolder = null;
+
+            if (!TryGetBuffer(indexBuffer.Handle, out var indexBufferHolder) ||
+                !TryGetBuffer(indirectBuffer.Handle, out var indirectBufferHolder) ||
+                (hasDrawCount && !TryGetBuffer(drawCountBuffer.Handle, out drawCountBufferHolder)))
+            {
+                return (null, null);
+            }
+
+            var indexBufferKey = new TopologyConversionIndirectCacheKey(
+                gd,
+                pattern,
+                indexSize,
+                indirectBufferHolder,
+                indirectBuffer.Offset,
+                indirectBuffer.Size);
+
+            bool hasConvertedIndexBuffer = indexBufferHolder.TryGetCachedConvertedBuffer(
+                indexBuffer.Offset,
+                indexBuffer.Size,
+                indexBufferKey,
+                out var convertedIndexBuffer);
+
+            var indirectBufferKey = new IndirectDataCacheKey(pattern);
+            bool hasConvertedIndirectBuffer = indirectBufferHolder.TryGetCachedConvertedBuffer(
+                indirectBuffer.Offset,
+                indirectBuffer.Size,
+                indirectBufferKey,
+                out var convertedIndirectBuffer);
+
+            var drawCountBufferKey = new DrawCountCacheKey();
+            bool hasCachedDrawCount = true;
+
+            if (hasDrawCount)
+            {
+                hasCachedDrawCount = drawCountBufferHolder.TryGetCachedConvertedBuffer(
+                    drawCountBuffer.Offset,
+                    drawCountBuffer.Size,
+                    drawCountBufferKey,
+                    out _);
+            }
+
+            if (!hasConvertedIndexBuffer || !hasConvertedIndirectBuffer || !hasCachedDrawCount)
+            {
+                // The destination index size is always I32.
+
+                int indexCount = indexBuffer.Size / indexSize;
+
+                int convertedCount = pattern.GetConvertedCount(indexCount);
+
+                if (!hasConvertedIndexBuffer)
+                {
+                    convertedIndexBuffer = Create(gd, convertedCount * 4);
+                    indexBufferKey.SetBuffer(convertedIndexBuffer.GetBuffer());
+                    indexBufferHolder.AddCachedConvertedBuffer(indexBuffer.Offset, indexBuffer.Size, indexBufferKey, convertedIndexBuffer);
+                }
+
+                if (!hasConvertedIndirectBuffer)
+                {
+                    convertedIndirectBuffer = Create(gd, indirectBuffer.Size);
+                    indirectBufferHolder.AddCachedConvertedBuffer(indirectBuffer.Offset, indirectBuffer.Size, indirectBufferKey, convertedIndirectBuffer);
+                }
+
+                gd.PipelineInternal.EndRenderPass();
+                gd.HelperShader.ConvertIndexBufferIndirect(
+                    gd,
+                    cbs,
+                    indirectBufferHolder,
+                    convertedIndirectBuffer,
+                    drawCountBuffer,
+                    indexBufferHolder,
+                    convertedIndexBuffer,
+                    pattern,
+                    indexSize,
+                    indexBuffer.Offset,
+                    indexBuffer.Size,
+                    indirectBuffer.Offset,
+                    hasDrawCount,
+                    maxDrawCount,
+                    indirectDataStride);
+
+                // Any modification of the indirect buffer should invalidate the index buffers that are associated with it,
+                // since we used the indirect data to find the range of the index buffer that is used.
+
+                var indexBufferDependency = new Dependency(
+                    indexBufferHolder,
+                    indexBuffer.Offset,
+                    indexBuffer.Size,
+                    indexBufferKey);
+
+                indirectBufferHolder.AddCachedConvertedBufferDependency(
+                    indirectBuffer.Offset,
+                    indirectBuffer.Size,
+                    indirectBufferKey,
+                    indexBufferDependency);
+
+                if (hasDrawCount)
+                {
+                    if (!hasCachedDrawCount)
+                    {
+                        drawCountBufferHolder.AddCachedConvertedBuffer(drawCountBuffer.Offset, drawCountBuffer.Size, drawCountBufferKey, null);
+                    }
+
+                    // If we have a draw count, any modification of the draw count should invalidate all indirect buffers
+                    // where we used it to find the range of indirect data that is actually used.
+
+                    var indirectBufferDependency = new Dependency(
+                        indirectBufferHolder,
+                        indirectBuffer.Offset,
+                        indirectBuffer.Size,
+                        indirectBufferKey);
+
+                    drawCountBufferHolder.AddCachedConvertedBufferDependency(
+                        drawCountBuffer.Offset,
+                        drawCountBuffer.Size,
+                        drawCountBufferKey,
+                        indirectBufferDependency);
+                }
+            }
+
+            return (convertedIndexBuffer.GetBuffer(), convertedIndirectBuffer.GetBuffer());
+        }
+
         public Auto<DisposableBuffer> GetBuffer(CommandBuffer commandBuffer, BufferHandle handle, bool isWrite, out int size)
         {
             if (TryGetBuffer(handle, out var holder))
@@ -142,14 +389,14 @@ namespace Ryujinx.Graphics.Vulkan
             return null;
         }
 
-        public ReadOnlySpan<byte> GetData(BufferHandle handle, int offset, int size)
+        public PinnedSpan<byte> GetData(BufferHandle handle, int offset, int size)
         {
             if (TryGetBuffer(handle, out var holder))
             {
                 return holder.GetData(offset, size);
             }
 
-            return ReadOnlySpan<byte>.Empty;
+            return new PinnedSpan<byte>();
         }
 
         public void SetData<T>(BufferHandle handle, int offset, ReadOnlySpan<T> data) where T : unmanaged

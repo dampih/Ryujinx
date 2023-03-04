@@ -5,11 +5,13 @@ using Avalonia.Styling;
 using Avalonia.Threading;
 using FluentAvalonia.Styling;
 using Ryujinx.Ava.Common.Locale;
-using Ryujinx.Ava.Ui.Controls;
-using Ryujinx.Ava.Ui.Windows;
+using Ryujinx.Ava.UI.Controls;
+using Ryujinx.Ava.UI.Helpers;
+using Ryujinx.Ava.UI.Windows;
 using Ryujinx.Common;
 using Ryujinx.Common.Logging;
 using Ryujinx.Ui.Common.Configuration;
+using Ryujinx.Ui.Common.Helper;
 using System;
 using System.Diagnostics;
 using System.IO;
@@ -20,6 +22,8 @@ namespace Ryujinx.Ava
     {
         public override void Initialize()
         {
+            Name = $"Ryujinx {Program.Version}";
+
             AvaloniaXamlLoader.Load(this);
         }
 
@@ -55,17 +59,16 @@ namespace Ryujinx.Ava
                 if (ApplicationLifetime is IClassicDesktopStyleApplicationLifetime desktop)
                 {
                     var result = await ContentDialogHelper.CreateConfirmationDialog(
-                        LocaleManager.Instance["DialogThemeRestartMessage"],
-                        LocaleManager.Instance["DialogThemeRestartSubMessage"],
-                        LocaleManager.Instance["InputDialogYes"],
-                        LocaleManager.Instance["InputDialogNo"],
-                        LocaleManager.Instance["DialogRestartRequiredMessage"]);
+                        LocaleManager.Instance[LocaleKeys.DialogThemeRestartMessage],
+                        LocaleManager.Instance[LocaleKeys.DialogThemeRestartSubMessage],
+                        LocaleManager.Instance[LocaleKeys.InputDialogYes],
+                        LocaleManager.Instance[LocaleKeys.InputDialogNo],
+                        LocaleManager.Instance[LocaleKeys.DialogRestartRequiredMessage]);
 
                     if (result == UserResult.Yes)
                     {
                         var path = Process.GetCurrentProcess().MainModule.FileName;
-                        var info = new ProcessStartInfo() { FileName = path, UseShellExecute = false };
-                        var proc = Process.Start(info);
+                        var proc = Process.Start(path, CommandLineState.Arguments);
                         desktop.Shutdown();
                         Environment.Exit(0);
                     }

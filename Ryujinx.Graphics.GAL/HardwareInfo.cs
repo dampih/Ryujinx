@@ -1,10 +1,6 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Text;
-
-namespace Ryujinx.Graphics.GAL
+﻿namespace Ryujinx.Graphics.GAL
 {
-    public struct HardwareInfo
+    public readonly struct HardwareInfo
     {
         public string GpuVendor { get; }
         public string GpuModel { get; }

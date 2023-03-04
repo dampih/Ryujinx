@@ -9,31 +9,42 @@ namespace Ryujinx.Graphics.Vulkan
         private ulong MaxDeviceMemoryUsageEstimate = 16UL * 1024 * 1024 * 1024;
 
         private readonly Vk _api;
+        private readonly PhysicalDevice _physicalDevice;
         private readonly Device _device;
         private readonly List<MemoryAllocatorBlockList> _blockLists;
+        private readonly int _blockAlignment;
+        private readonly PhysicalDeviceMemoryProperties _physicalDeviceMemoryProperties;
 
-        private int _blockAlignment;
-
-        public MemoryAllocator(Vk api, Device device, uint maxMemoryAllocationCount)
+        public MemoryAllocator(Vk api, PhysicalDevice physicalDevice, Device device, uint maxMemoryAllocationCount)
         {
             _api = api;
+            _physicalDevice = physicalDevice;
             _device = device;
             _blockLists = new List<MemoryAllocatorBlockList>();
             _blockAlignment = (int)Math.Min(int.MaxValue, MaxDeviceMemoryUsageEstimate / (ulong)maxMemoryAllocationCount);
+
+            _api.GetPhysicalDeviceMemoryProperties(_physicalDevice, out _physicalDeviceMemoryProperties);
         }
 
         public MemoryAllocation AllocateDeviceMemory(
-            PhysicalDevice physicalDevice,
             MemoryRequirements requirements,
             MemoryPropertyFlags flags = 0)
         {
-            int memoryTypeIndex = FindSuitableMemoryTypeIndex(_api, physicalDevice, requirements.MemoryTypeBits, flags);
+            return AllocateDeviceMemory(requirements, flags, flags);
+        }
+
+        public MemoryAllocation AllocateDeviceMemory(
+            MemoryRequirements requirements,
+            MemoryPropertyFlags flags,
+            MemoryPropertyFlags alternativeFlags)
+        {
+            int memoryTypeIndex = FindSuitableMemoryTypeIndex(requirements.MemoryTypeBits, flags, alternativeFlags);
             if (memoryTypeIndex < 0)
             {
                 return default;
             }
 
-            bool map = flags.HasFlag(MemoryPropertyFlags.MemoryPropertyHostVisibleBit);
+            bool map = flags.HasFlag(MemoryPropertyFlags.HostVisibleBit);
             return Allocate(memoryTypeIndex, requirements.Size, requirements.Alignment, map);
         }
 
@@ -56,21 +67,46 @@ namespace Ryujinx.Graphics.Vulkan
             return newBl.Allocate(size, alignment, map);
         }
 
-        private static int FindSuitableMemoryTypeIndex(Vk api, PhysicalDevice physicalDevice, uint memoryTypeBits, MemoryPropertyFlags flags)
+        private int FindSuitableMemoryTypeIndex(
+            uint memoryTypeBits,
+            MemoryPropertyFlags flags,
+            MemoryPropertyFlags alternativeFlags)
         {
-            api.GetPhysicalDeviceMemoryProperties(physicalDevice, out var properties);
+            int bestCandidateIndex = -1;
 
-            for (int i = 0; i < properties.MemoryTypeCount; i++)
+            for (int i = 0; i < _physicalDeviceMemoryProperties.MemoryTypeCount; i++)
             {
-                var type = properties.MemoryTypes[i];
+                var type = _physicalDeviceMemoryProperties.MemoryTypes[i];
 
-                if ((memoryTypeBits & (1 << i)) != 0 && type.PropertyFlags.HasFlag(flags))
+                if ((memoryTypeBits & (1 << i)) != 0)
                 {
-                    return i;
+                    if (type.PropertyFlags.HasFlag(flags))
+                    {
+                        return i;
+                    }
+                    else if (type.PropertyFlags.HasFlag(alternativeFlags))
+                    {
+                        bestCandidateIndex = i;
+                    }
                 }
             }
 
-            return -1;
+            return bestCandidateIndex;
+        }
+
+        public bool IsDeviceMemoryShared(Vk api, PhysicalDevice physicalDevice)
+        {
+            // The device is regarded as having shared memory if all heaps have the device local bit.
+
+            for (int i = 0; i < _physicalDeviceMemoryProperties.MemoryHeapCount; i++)
+            {
+                if (!_physicalDeviceMemoryProperties.MemoryHeaps[i].Flags.HasFlag(MemoryHeapFlags.DeviceLocalBit))
+                {
+                    return false;
+                }
+            }
+
+            return true;
         }
 
         public void Dispose()

@@ -1,4 +1,5 @@
-﻿using Ryujinx.Graphics.GAL;
+﻿using Ryujinx.Common.Memory;
+using Ryujinx.Graphics.GAL;
 using Silk.NET.Vulkan;
 using System;
 using System.Collections.Generic;
@@ -16,9 +17,12 @@ namespace Ryujinx.Graphics.Vulkan
         private Auto<DisposableBufferView> _bufferView;
         private Dictionary<GAL.Format, Auto<DisposableBufferView>> _selfManagedViews;
 
+        private int _bufferCount;
+
         public int Width { get; }
         public int Height { get; }
 
+        public GAL.Format Format { get;}
         public VkFormat VkFormat { get; }
 
         public float ScaleFactor { get; }
@@ -28,6 +32,7 @@ namespace Ryujinx.Graphics.Vulkan
             _gd = gd;
             Width = info.Width;
             Height = info.Height;
+            Format = info.Format;
             VkFormat = FormatTable.GetFormat(info.Format);
             ScaleFactor = scale;
 
@@ -54,12 +59,12 @@ namespace Ryujinx.Graphics.Vulkan
             throw new NotSupportedException();
         }
 
-        public ReadOnlySpan<byte> GetData()
+        public PinnedSpan<byte> GetData()
         {
             return _gd.GetBufferData(_bufferHandle, _offset, _size);
         }
 
-        public ReadOnlySpan<byte> GetData(int layer, int level)
+        public PinnedSpan<byte> GetData(int layer, int level)
         {
             return GetData();
         }
@@ -88,12 +93,17 @@ namespace Ryujinx.Graphics.Vulkan
             _bufferView = null;
         }
 
-        public void SetData(ReadOnlySpan<byte> data)
+        public void SetData(SpanOrArray<byte> data)
         {
             _gd.SetBufferData(_bufferHandle, _offset, data);
         }
 
-        public void SetData(ReadOnlySpan<byte> data, int layer, int level)
+        public void SetData(SpanOrArray<byte> data, int layer, int level)
+        {
+            throw new NotSupportedException();
+        }
+
+        public void SetData(SpanOrArray<byte> data, int layer, int level, Rectangle<int> region)
         {
             throw new NotSupportedException();
         }
@@ -102,7 +112,8 @@ namespace Ryujinx.Graphics.Vulkan
         {
             if (_bufferHandle == buffer.Handle &&
                 _offset == buffer.Offset &&
-                _size == buffer.Size)
+                _size == buffer.Size &&
+                _bufferCount == _gd.BufferManager.BufferCount)
             {
                 return;
             }
@@ -110,15 +121,16 @@ namespace Ryujinx.Graphics.Vulkan
             _bufferHandle = buffer.Handle;
             _offset = buffer.Offset;
             _size = buffer.Size;
+            _bufferCount = _gd.BufferManager.BufferCount;
 
-            ReleaseImpl();;
+            ReleaseImpl();
         }
 
         public BufferView GetBufferView(CommandBufferScoped cbs)
         {
             if (_bufferView == null)
             {
-                _bufferView = _gd.BufferManager.CreateView(_bufferHandle, VkFormat, _offset, _size);
+                _bufferView = _gd.BufferManager.CreateView(_bufferHandle, VkFormat, _offset, _size, ReleaseImpl);
             }
 
             return _bufferView?.Get(cbs, _offset, _size).Value ?? default;
@@ -137,7 +149,7 @@ namespace Ryujinx.Graphics.Vulkan
                 return bufferView.Get(cbs, _offset, _size).Value;
             }
 
-            bufferView = _gd.BufferManager.CreateView(_bufferHandle, vkFormat, _offset, _size);
+            bufferView = _gd.BufferManager.CreateView(_bufferHandle, vkFormat, _offset, _size, ReleaseImpl);
 
             if (bufferView != null)
             {

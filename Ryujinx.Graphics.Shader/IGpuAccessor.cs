@@ -115,6 +115,16 @@ namespace Ryujinx.Graphics.Shader
         }
 
         /// <summary>
+        /// Queries output type for fragment shaders.
+        /// </summary>
+        /// <param name="location">Location of the framgent output</param>
+        /// <returns>Output location</returns>
+        AttributeType QueryFragmentOutputType(int location)
+        {
+            return AttributeType.Float;
+        }
+
+        /// <summary>
         /// Queries Local Size X for compute shaders.
         /// </summary>
         /// <returns>Local Size X</returns>
@@ -166,6 +176,33 @@ namespace Ryujinx.Graphics.Shader
         uint QueryConstantBufferUse()
         {
             return 0;
+        }
+
+        /// <summary>
+        /// Queries whenever the current draw has written the base vertex and base instance into Constant Buffer 0.
+        /// </summary>
+        /// <returns>True if the shader translator can assume that the constant buffer contains the base IDs, false otherwise</returns>
+        bool QueryHasConstantBufferDrawParameters()
+        {
+            return false;
+        }
+
+        /// <summary>
+        /// Queries whenever the current draw uses unaligned storage buffer addresses.
+        /// </summary>
+        /// <returns>True if any storage buffer address is not aligned to 16 bytes, false otherwise</returns>
+        bool QueryHasUnalignedStorageBuffer()
+        {
+            return false;
+        }
+
+        /// <summary>
+        /// Queries host about whether to reduce precision to improve performance.
+        /// </summary>
+        /// <returns>True if precision is limited to vertex position, false otherwise</returns>
+        bool QueryHostReducedPrecision()
+        {
+            return false;
         }
 
         /// <summary>
@@ -223,6 +260,15 @@ namespace Ryujinx.Graphics.Shader
         }
 
         /// <summary>
+        /// Queries host GPU geometry shader support.
+        /// </summary>
+        /// <returns>True if the GPU and driver supports geometry shaders, false otherwise</returns>
+        bool QueryHostSupportsGeometryShader()
+        {
+            return true;
+        }
+
+        /// <summary>
         /// Queries host GPU geometry shader passthrough support.
         /// </summary>
         /// <returns>True if the GPU and driver supports geometry shader passthrough, false otherwise</returns>
@@ -236,6 +282,15 @@ namespace Ryujinx.Graphics.Shader
         /// </summary>
         /// <returns>True if formatted image load is supported, false otherwise</returns>
         bool QueryHostSupportsImageLoadFormatted()
+        {
+            return true;
+        }
+
+        /// <summary>
+        /// Queries host support for writes to Layer from vertex or tessellation shader stages.
+        /// </summary>
+        /// <returns>True if writes to layer from vertex or tessellation are supported, false otherwise</returns>
+        bool QueryHostSupportsLayerVertexTessellation()
         {
             return true;
         }
@@ -259,10 +314,28 @@ namespace Ryujinx.Graphics.Shader
         }
 
         /// <summary>
+        /// Queries host GPU support for signed normalized buffer texture formats.
+        /// </summary>
+        /// <returns>True if the GPU and driver supports the formats, false otherwise</returns>
+        bool QueryHostSupportsSnormBufferTextureFormat()
+        {
+            return true;
+        }
+
+        /// <summary>
         /// Queries host GPU texture shadow LOD support.
         /// </summary>
         /// <returns>True if the GPU and driver supports texture shadow LOD, false otherwise</returns>
         bool QueryHostSupportsTextureShadowLod()
+        {
+            return true;
+        }
+
+        /// <summary>
+        /// Queries host GPU shader viewport index output support.
+        /// </summary>
+        /// <returns>True if the GPU and driver supports shader viewport index output, false otherwise</returns>
+        bool QueryHostSupportsViewportIndex()
         {
             return true;
         }

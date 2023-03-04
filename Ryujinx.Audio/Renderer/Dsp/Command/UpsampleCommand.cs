@@ -1,6 +1,5 @@
 using Ryujinx.Audio.Renderer.Server.Upsampler;
 using System;
-using System.Runtime.CompilerServices;
 
 namespace Ryujinx.Audio.Renderer.Dsp.Command
 {
@@ -12,7 +11,7 @@ namespace Ryujinx.Audio.Renderer.Dsp.Command
 
         public CommandType CommandType => CommandType.Upsample;
 
-        public ulong EstimatedProcessingTime { get; set; }
+        public uint EstimatedProcessingTime { get; set; }
 
         public uint BufferCount { get; }
         public uint InputBufferIndex { get; }
@@ -41,6 +40,12 @@ namespace Ryujinx.Audio.Renderer.Dsp.Command
                 info.InputBufferIndices[i] = (ushort)(bufferOffset + inputBufferOffset[i]);
             }
 
+            if (info.BufferStates?.Length != (int)inputCount)
+            {
+                // Keep state if possible.
+                info.BufferStates = new UpsamplerBufferState[(int)inputCount];
+            }
+
             UpsamplerInfo = info;
         }
 
@@ -51,8 +56,6 @@ namespace Ryujinx.Audio.Renderer.Dsp.Command
 
         public void Process(CommandList context)
         {
-            float ratio = (float)InputSampleRate / Constants.TargetSampleRate;
-
             uint bufferCount = Math.Min(BufferCount, UpsamplerInfo.SourceSampleCount);
 
             for (int i = 0; i < bufferCount; i++)
@@ -60,9 +63,7 @@ namespace Ryujinx.Audio.Renderer.Dsp.Command
                 Span<float> inputBuffer = context.GetBuffer(UpsamplerInfo.InputBufferIndices[i]);
                 Span<float> outputBuffer = GetBuffer(UpsamplerInfo.InputBufferIndices[i], (int)UpsamplerInfo.SampleCount);
 
-                float fraction = 0.0f;
-
-                ResamplerHelper.ResampleForUpsampler(outputBuffer, inputBuffer, ratio, ref fraction, (int)(InputSampleCount / ratio));
+                UpsamplerHelper.Upsample(outputBuffer, inputBuffer, (int)UpsamplerInfo.SampleCount, (int)InputSampleCount, ref UpsamplerInfo.BufferStates[i]);
             }
         }
     }

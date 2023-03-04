@@ -1,4 +1,4 @@
-﻿using Ryujinx.Common;
+using Ryujinx.Common.Memory;
 using Ryujinx.Graphics.GAL;
 using Silk.NET.Vulkan;
 using System;
@@ -54,6 +54,7 @@ namespace Ryujinx.Graphics.Vulkan
             gd.Textures.Add(this);
 
             var format = _gd.FormatCapabilities.ConvertToVkFormat(info.Format);
+            var usage = TextureStorage.GetImageUsageFromFormat(info.Format);
             var levels = (uint)info.Levels;
             var layers = (uint)info.GetLayers();
 
@@ -75,17 +76,7 @@ namespace Ryujinx.Graphics.Vulkan
                 swizzleR = swizzleB;
                 swizzleB = temp;
             }
-            else if (info.Format == GAL.Format.R4G4B4A4Unorm)
-            {
-                var tempG = swizzleG;
-                var tempB = swizzleB;
-
-                swizzleB = swizzleA;
-                swizzleG = swizzleR;
-                swizzleR = tempG;
-                swizzleA = tempB;
-            }
-            else if (info.Format == GAL.Format.A1B5G5R5Unorm)
+            else if (VkFormat == VkFormat.R4G4B4A4UnormPack16 || info.Format == GAL.Format.A1B5G5R5Unorm)
             {
                 var tempB = swizzleB;
                 var tempA = swizzleA;
@@ -99,13 +90,19 @@ namespace Ryujinx.Graphics.Vulkan
             var componentMapping = new ComponentMapping(swizzleR, swizzleG, swizzleB, swizzleA);
 
             var aspectFlags = info.Format.ConvertAspectFlags(info.DepthStencilMode);
-            var aspectFlagsDepth = info.Format.ConvertAspectFlags(DepthStencilMode.Depth);
+            var aspectFlagsDepth = info.Format.ConvertAspectFlags();
 
             var subresourceRange = new ImageSubresourceRange(aspectFlags, (uint)firstLevel, levels, (uint)firstLayer, layers);
             var subresourceRangeDepth = new ImageSubresourceRange(aspectFlagsDepth, (uint)firstLevel, levels, (uint)firstLayer, layers);
 
-            unsafe Auto<DisposableImageView> CreateImageView(ComponentMapping cm, ImageSubresourceRange sr, ImageViewType viewType)
+            unsafe Auto<DisposableImageView> CreateImageView(ComponentMapping cm, ImageSubresourceRange sr, ImageViewType viewType, ImageUsageFlags usageFlags)
             {
+                var usage = new ImageViewUsageCreateInfo()
+                {
+                    SType = StructureType.ImageViewUsageCreateInfo,
+                    Usage = usageFlags
+                };
+
                 var imageCreateInfo = new ImageViewCreateInfo()
                 {
                     SType = StructureType.ImageViewCreateInfo,
@@ -113,14 +110,15 @@ namespace Ryujinx.Graphics.Vulkan
                     ViewType = viewType,
                     Format = format,
                     Components = cm,
-                    SubresourceRange = sr
+                    SubresourceRange = sr,
+                    PNext = &usage
                 };
 
                 gd.Api.CreateImageView(device, imageCreateInfo, null, out var imageView).ThrowOnError();
                 return new Auto<DisposableImageView>(new DisposableImageView(gd.Api, device, imageView), null, storage.GetImage());
             }
 
-            _imageView = CreateImageView(componentMapping, subresourceRange, type);
+            _imageView = CreateImageView(componentMapping, subresourceRange, type, ImageUsageFlags.SampledBit);
 
             // Framebuffer attachments and storage images requires a identity component mapping.
             var identityComponentMapping = new ComponentMapping(
@@ -129,14 +127,26 @@ namespace Ryujinx.Graphics.Vulkan
                 ComponentSwizzle.B,
                 ComponentSwizzle.A);
 
-            _imageViewIdentity = CreateImageView(identityComponentMapping, subresourceRangeDepth, type);
+            _imageViewIdentity = CreateImageView(identityComponentMapping, subresourceRangeDepth, type, usage);
 
             // Framebuffer attachments also require 3D textures to be bound as 2D array.
             if (info.Target == Target.Texture3D)
             {
-                subresourceRange = new ImageSubresourceRange(aspectFlags, (uint)firstLevel, levels, (uint)firstLayer, (uint)info.Depth);
+                if (gd.Capabilities.PortabilitySubset.HasFlag(PortabilitySubsetFlags.No3DImageView))
+                {
+                    if (levels == 1 && (info.Format.IsRtColorCompatible() || info.Format.IsDepthOrStencil()))
+                    {
+                        subresourceRange = new ImageSubresourceRange(aspectFlags, (uint)firstLevel, levels, (uint)firstLayer, 1);
 
-                _imageView2dArray = CreateImageView(identityComponentMapping, subresourceRange, ImageViewType.ImageViewType2DArray);
+                        _imageView2dArray = CreateImageView(identityComponentMapping, subresourceRange, ImageViewType.Type2D, ImageUsageFlags.ColorAttachmentBit);
+                    }
+                }
+                else
+                {
+                    subresourceRange = new ImageSubresourceRange(aspectFlags, (uint)firstLevel, levels, (uint)firstLayer, (uint)info.Depth);
+
+                    _imageView2dArray = CreateImageView(identityComponentMapping, subresourceRange, ImageViewType.Type2DArray, usage);
+                }
             }
 
             Valid = true;
@@ -179,12 +189,28 @@ namespace Ryujinx.Graphics.Vulkan
             var srcImage = src.GetImage().Get(cbs).Value;
             var dstImage = dst.GetImage().Get(cbs).Value;
 
-            if (src.Info.Target.IsMultisample())
+            if (!dst.Info.Target.IsMultisample() && Info.Target.IsMultisample())
             {
-                int depth = Math.Min(src.Info.Depth, dst.Info.Depth - firstLayer);
-                int levels = Math.Min(src.Info.Levels, dst.Info.Levels - firstLevel);
+                int layers = Math.Min(Info.GetLayers(), dst.Info.GetLayers() - firstLayer);
+                _gd.HelperShader.CopyMSToNonMS(_gd, cbs, src, dst, 0, firstLayer, layers);
+            }
+            else if (dst.Info.Target.IsMultisample() && !Info.Target.IsMultisample())
+            {
+                int layers = Math.Min(Info.GetLayers(), dst.Info.GetLayers() - firstLayer);
+                _gd.HelperShader.CopyNonMSToMS(_gd, cbs, src, dst, 0, firstLayer, layers);
+            }
+            else if (dst.Info.BytesPerPixel != Info.BytesPerPixel)
+            {
+                int layers = Math.Min(Info.GetLayers(), dst.Info.GetLayers() - firstLayer);
+                int levels = Math.Min(Info.Levels, dst.Info.Levels - firstLevel);
+                _gd.HelperShader.CopyIncompatibleFormats(_gd, cbs, src, dst, 0, firstLayer, 0, firstLevel, layers, levels);
+            }
+            else if (src.Info.Format.IsDepthOrStencil() != dst.Info.Format.IsDepthOrStencil())
+            {
+                int layers = Math.Min(Info.GetLayers(), dst.Info.GetLayers() - firstLayer);
+                int levels = Math.Min(Info.Levels, dst.Info.Levels - firstLevel);
 
-                CopyMSToNonMS(_gd, cbs, src, dst, srcImage, dstImage, 0, firstLayer, 0, firstLevel, depth, levels);
+                _gd.HelperShader.CopyColor(_gd, cbs, src, dst, 0, firstLayer, 0, FirstLevel, layers, levels);
             }
             else
             {
@@ -223,9 +249,21 @@ namespace Ryujinx.Graphics.Vulkan
             var srcImage = src.GetImage().Get(cbs).Value;
             var dstImage = dst.GetImage().Get(cbs).Value;
 
-            if (src.Info.Target.IsMultisample())
+            if (!dst.Info.Target.IsMultisample() && Info.Target.IsMultisample())
             {
-                CopyMSToNonMS(_gd, cbs, src, dst, srcImage, dstImage, srcLayer, dstLayer, srcLevel, dstLevel, 1, 1);
+                _gd.HelperShader.CopyMSToNonMS(_gd, cbs, src, dst, srcLayer, dstLayer, 1);
+            }
+            else if (dst.Info.Target.IsMultisample() && !Info.Target.IsMultisample())
+            {
+                _gd.HelperShader.CopyNonMSToMS(_gd, cbs, src, dst, srcLayer, dstLayer, 1);
+            }
+            else if (dst.Info.BytesPerPixel != Info.BytesPerPixel)
+            {
+                _gd.HelperShader.CopyIncompatibleFormats(_gd, cbs, src, dst, srcLayer, dstLayer, srcLevel, dstLevel, 1, 1);
+            }
+            else if (src.Info.Format.IsDepthOrStencil() != dst.Info.Format.IsDepthOrStencil())
+            {
+                _gd.HelperShader.CopyColor(_gd, cbs, src, dst, srcLayer, dstLayer, srcLevel, dstLevel, 1, 1);
             }
             else
             {
@@ -247,142 +285,6 @@ namespace Ryujinx.Graphics.Vulkan
                     1,
                     1);
             }
-        }
-
-        private static void CopyMSToNonMS(
-            VulkanRenderer gd,
-            CommandBufferScoped cbs,
-            TextureView src,
-            TextureView dst,
-            Image srcImage,
-            Image dstImage,
-            int srcLayer,
-            int dstLayer,
-            int srcLevel,
-            int dstLevel,
-            int layers,
-            int levels)
-        {
-            bool differentFormats = src.Info.Format != dst.Info.Format;
-
-            var target = src.Info.Target switch
-            {
-                Target.Texture2D => Target.Texture2DMultisample,
-                Target.Texture2DArray => Target.Texture2DMultisampleArray,
-                Target.Texture2DMultisampleArray => Target.Texture2DArray,
-                _ => Target.Texture2D
-            };
-
-            var intermmediateTarget = differentFormats ? dst.Info.Target : target;
-            using var intermmediate = CreateIntermmediateTexture(gd, src, ref dst._info, intermmediateTarget, layers, levels);
-            var intermmediateImage = intermmediate.GetImage().Get(cbs).Value;
-
-            if (differentFormats)
-            {
-                // If the formats are different, the resolve would perform format conversion.
-                // So we need yet another intermmediate texture and do a copy to reinterpret the
-                // data into the correct (destination) format, without doing any sort of conversion.
-                using var intermmediate2 = CreateIntermmediateTexture(gd, src, ref src._info, target, layers, levels);
-                var intermmediate2Image = intermmediate2.GetImage().Get(cbs).Value;
-
-                TextureCopy.Copy(
-                    gd.Api,
-                    cbs.CommandBuffer,
-                    srcImage,
-                    intermmediate2Image,
-                    src.Info,
-                    intermmediate2.Info,
-                    src.FirstLayer,
-                    0,
-                    src.FirstLevel,
-                    0,
-                    srcLayer,
-                    0,
-                    srcLevel,
-                    0,
-                    layers,
-                    levels);
-
-                TextureCopy.Copy(
-                    gd.Api,
-                    cbs.CommandBuffer,
-                    intermmediate2Image,
-                    intermmediateImage,
-                    intermmediate2.Info,
-                    intermmediate.Info,
-                    0,
-                    0,
-                    0,
-                    0,
-                    0,
-                    0,
-                    0,
-                    0,
-                    layers,
-                    levels);
-            }
-            else
-            {
-                TextureCopy.Copy(
-                    gd.Api,
-                    cbs.CommandBuffer,
-                    srcImage,
-                    intermmediateImage,
-                    src.Info,
-                    intermmediate.Info,
-                    src.FirstLayer,
-                    0,
-                    src.FirstLevel,
-                    0,
-                    srcLayer,
-                    0,
-                    srcLevel,
-                    0,
-                    layers,
-                    levels);
-            }
-
-            var srcRegion = new Extents2D(0, 0, src.Width, src.Height);
-            var dstRegion = new Extents2D(0, 0, dst.Width, dst.Height);
-
-            TextureCopy.Blit(
-                gd.Api,
-                cbs.CommandBuffer,
-                intermmediateImage,
-                dstImage,
-                intermmediate.Info,
-                dst.Info,
-                srcRegion,
-                dstRegion,
-                0,
-                dst.FirstLevel + dstLevel,
-                0,
-                dst.FirstLayer + dstLayer,
-                layers,
-                levels,
-                true,
-                ImageAspectFlags.ImageAspectColorBit,
-                ImageAspectFlags.ImageAspectColorBit);
-        }
-
-        private static TextureView CreateIntermmediateTexture(VulkanRenderer gd, TextureView src, ref TextureCreateInfo formatInfo, Target target, int depth, int levels)
-        {
-            return gd.CreateTextureView(new GAL.TextureCreateInfo(
-                src.Width,
-                src.Height,
-                depth,
-                levels,
-                1,
-                formatInfo.BlockWidth,
-                formatInfo.BlockHeight,
-                formatInfo.BytesPerPixel,
-                formatInfo.Format,
-                DepthStencilMode.Depth,
-                target,
-                SwizzleComponent.Red,
-                SwizzleComponent.Green,
-                SwizzleComponent.Blue,
-                SwizzleComponent.Alpha), 1f);
         }
 
         public void CopyTo(ITexture destination, Extents2D srcRegion, Extents2D dstRegion, bool linearFilter)
@@ -432,28 +334,37 @@ namespace Ryujinx.Graphics.Vulkan
                     src.Height == dst.Height &&
                     src.VkFormat == dst.VkFormat)
                 {
-                    TextureCopy.Copy(
-                        _gd.Api,
-                        cbs.CommandBuffer,
-                        src.GetImage().Get(cbs).Value,
-                        dst.GetImage().Get(cbs).Value,
-                        src.Info,
-                        dst.Info,
-                        src.FirstLayer,
-                        dst.FirstLayer,
-                        src.FirstLevel,
-                        dst.FirstLevel,
-                        0,
-                        0,
-                        0,
-                        0,
-                        layers,
-                        levels);
+                    if (src.Info.Samples > 1 && src.Info.Samples != dst.Info.Samples && src.Info.Format.IsDepthOrStencil())
+                    {
+                        // CmdResolveImage does not support depth-stencil resolve, so we need to use an alternative path
+                        // for those textures.
+                        TextureCopy.ResolveDepthStencil(_gd, _device, cbs, src, dst);
+                    }
+                    else
+                    {
+                        TextureCopy.Copy(
+                            _gd.Api,
+                            cbs.CommandBuffer,
+                            src.GetImage().Get(cbs).Value,
+                            dst.GetImage().Get(cbs).Value,
+                            src.Info,
+                            dst.Info,
+                            src.FirstLayer,
+                            dst.FirstLayer,
+                            src.FirstLevel,
+                            dst.FirstLevel,
+                            0,
+                            0,
+                            0,
+                            0,
+                            layers,
+                            levels);
+                    }
 
                     return;
                 }
-                else if (_gd.FormatCapabilities.FormatSupports(FormatFeatureFlags.FormatFeatureBlitSrcBit, srcFormat) &&
-                         _gd.FormatCapabilities.FormatSupports(FormatFeatureFlags.FormatFeatureBlitDstBit, dstFormat))
+                else if (_gd.FormatCapabilities.OptimalFormatSupports(FormatFeatureFlags.BlitSrcBit, srcFormat) &&
+                         _gd.FormatCapabilities.OptimalFormatSupports(FormatFeatureFlags.BlitDstBit, dstFormat))
                 {
                     TextureCopy.Blit(
                         _gd.Api,
@@ -474,29 +385,21 @@ namespace Ryujinx.Graphics.Vulkan
 
                     return;
                 }
-                else if (srcFormat == GAL.Format.D32FloatS8Uint && srcFormat == dstFormat && SupportsBlitFromD32FS8ToD32FAndS8())
-                {
-                    BlitDepthStencilWithBuffer(_gd, cbs, src, dst, srcRegion, dstRegion);
-
-                    return;
-                }
             }
 
-            if (VulkanConfiguration.UseSlowSafeBlitOnAmd &&
-                _gd.Vendor == Vendor.Amd &&
-                src.Info.Target == Target.Texture2D &&
-                dst.Info.Target == Target.Texture2D &&
-                !dst.Info.Format.IsDepthOrStencil())
+            bool isDepthOrStencil = dst.Info.Format.IsDepthOrStencil();
+
+            if (VulkanConfiguration.UseSlowSafeBlitOnAmd && (_gd.Vendor == Vendor.Amd || _gd.IsMoltenVk))
             {
                 _gd.HelperShader.Blit(
                     _gd,
                     src,
-                    dst.GetIdentityImageView(),
-                    dst.Width,
-                    dst.Height,
-                    dst.VkFormat,
+                    dst,
                     srcRegion,
                     dstRegion,
+                    layers,
+                    levels,
+                    isDepthOrStencil,
                     linearFilter);
 
                 return;
@@ -505,7 +408,7 @@ namespace Ryujinx.Graphics.Vulkan
             Auto<DisposableImage> srcImage;
             Auto<DisposableImage> dstImage;
 
-            if (dst.Info.Format.IsDepthOrStencil())
+            if (isDepthOrStencil)
             {
                 srcImage = src.Storage.CreateAliasedColorForDepthStorageUnsafe(srcFormat).GetImage();
                 dstImage = dst.Storage.CreateAliasedColorForDepthStorageUnsafe(dstFormat).GetImage();
@@ -525,198 +428,15 @@ namespace Ryujinx.Graphics.Vulkan
                 dst.Info,
                 srcRegion,
                 dstRegion,
-                src.FirstLevel,
-                dst.FirstLevel,
                 src.FirstLayer,
                 dst.FirstLayer,
+                src.FirstLevel,
+                dst.FirstLevel,
                 layers,
                 levels,
                 linearFilter,
-                ImageAspectFlags.ImageAspectColorBit,
-                ImageAspectFlags.ImageAspectColorBit);
-        }
-
-        private static void BlitDepthStencilWithBuffer(
-            VulkanRenderer gd,
-            CommandBufferScoped cbs,
-            TextureView src,
-            TextureView dst,
-            Extents2D srcRegion,
-            Extents2D dstRegion)
-        {
-            int drBaseX = Math.Min(dstRegion.X1, dstRegion.X2);
-            int drBaseY = Math.Min(dstRegion.Y1, dstRegion.Y2);
-            int drWidth = Math.Abs(dstRegion.X2 - dstRegion.X1);
-            int drHeight = Math.Abs(dstRegion.Y2 - dstRegion.Y1);
-
-            var drOriginZero = new Extents2D(
-                dstRegion.X1 - drBaseX,
-                dstRegion.Y1 - drBaseY,
-                dstRegion.X2 - drBaseX,
-                dstRegion.Y2 - drBaseY);
-
-            var d32SrcStorageInfo = TextureStorage.NewCreateInfoWith(ref src._info, GAL.Format.D32Float, 4);
-            var d32DstStorageInfo = TextureStorage.NewCreateInfoWith(ref dst._info, GAL.Format.D32Float, 4, drWidth, drHeight);
-            var s8SrcStorageInfo = TextureStorage.NewCreateInfoWith(ref src._info, GAL.Format.S8Uint, 1);
-            var s8DstStorageInfo = TextureStorage.NewCreateInfoWith(ref dst._info, GAL.Format.S8Uint, 1, drWidth, drHeight);
-
-            using var d32SrcStorage = gd.CreateTextureStorage(d32SrcStorageInfo, src.Storage.ScaleFactor);
-            using var d32DstStorage = gd.CreateTextureStorage(d32DstStorageInfo, dst.Storage.ScaleFactor);
-            using var s8SrcStorage = gd.CreateTextureStorage(s8SrcStorageInfo, src.Storage.ScaleFactor);
-            using var s8DstStorage = gd.CreateTextureStorage(s8DstStorageInfo, dst.Storage.ScaleFactor);
-
-            void SlowBlit(TextureStorage srcTemp, TextureStorage dstTemp, ImageAspectFlags aspectFlags)
-            {
-                int levels = Math.Min(src.Info.Levels, dst.Info.Levels);
-
-                int srcSize = 0;
-                int dstSize = 0;
-
-                for (int l = 0; l < levels; l++)
-                {
-                    srcSize += srcTemp.Info.GetMipSize2D(l);
-                    dstSize += dstTemp.Info.GetMipSize2D(l);
-                }
-
-                using var srcTempBuffer = gd.BufferManager.Create(gd, srcSize, deviceLocal: true);
-                using var dstTempBuffer = gd.BufferManager.Create(gd, dstSize, deviceLocal: true);
-
-                src.Storage.CopyFromOrToBuffer(
-                    cbs.CommandBuffer,
-                    srcTempBuffer.GetBuffer().Get(cbs, 0, srcSize).Value,
-                    src.GetImage().Get(cbs).Value,
-                    srcSize,
-                    to: true,
-                    0,
-                    0,
-                    src.FirstLayer,
-                    src.FirstLevel,
-                    1,
-                    levels,
-                    true,
-                    aspectFlags,
-                    false);
-
-                BufferHolder.InsertBufferBarrier(
-                    gd,
-                    cbs.CommandBuffer,
-                    srcTempBuffer.GetBuffer().Get(cbs, 0, srcSize).Value,
-                    AccessFlags.AccessTransferWriteBit,
-                    AccessFlags.AccessTransferReadBit,
-                    PipelineStageFlags.PipelineStageTransferBit,
-                    PipelineStageFlags.PipelineStageTransferBit,
-                    0,
-                    srcSize);
-
-                srcTemp.CopyFromOrToBuffer(
-                    cbs.CommandBuffer,
-                    srcTempBuffer.GetBuffer().Get(cbs, 0, srcSize).Value,
-                    srcTemp.GetImage().Get(cbs).Value,
-                    srcSize,
-                    to: false,
-                    0,
-                    0,
-                    0,
-                    0,
-                    1,
-                    levels,
-                    true,
-                    aspectFlags,
-                    false);
-
-                InsertImageBarrier(
-                    gd.Api,
-                    cbs.CommandBuffer,
-                    srcTemp.GetImage().Get(cbs).Value,
-                    AccessFlags.AccessTransferWriteBit,
-                    AccessFlags.AccessTransferReadBit,
-                    PipelineStageFlags.PipelineStageTransferBit,
-                    PipelineStageFlags.PipelineStageTransferBit,
-                    aspectFlags,
-                    0,
-                    0,
-                    1,
-                    levels);
-
-                TextureCopy.Blit(
-                    gd.Api,
-                    cbs.CommandBuffer,
-                    srcTemp.GetImage().Get(cbs).Value,
-                    dstTemp.GetImage().Get(cbs).Value,
-                    srcTemp.Info,
-                    dstTemp.Info,
-                    srcRegion,
-                    drOriginZero,
-                    0,
-                    0,
-                    0,
-                    0,
-                    1,
-                    levels,
-                    false,
-                    aspectFlags,
-                    aspectFlags);
-
-                InsertImageBarrier(
-                    gd.Api,
-                    cbs.CommandBuffer,
-                    dstTemp.GetImage().Get(cbs).Value,
-                    AccessFlags.AccessTransferWriteBit,
-                    AccessFlags.AccessTransferReadBit,
-                    PipelineStageFlags.PipelineStageTransferBit,
-                    PipelineStageFlags.PipelineStageTransferBit,
-                    aspectFlags,
-                    0,
-                    0,
-                    1,
-                    levels);
-
-                dstTemp.CopyFromOrToBuffer(
-                    cbs.CommandBuffer,
-                    dstTempBuffer.GetBuffer().Get(cbs, 0, dstSize).Value,
-                    dstTemp.GetImage().Get(cbs).Value,
-                    dstSize,
-                    to: true,
-                    0,
-                    0,
-                    0,
-                    0,
-                    1,
-                    levels,
-                    true,
-                    aspectFlags,
-                    false);
-
-                BufferHolder.InsertBufferBarrier(
-                    gd,
-                    cbs.CommandBuffer,
-                    dstTempBuffer.GetBuffer().Get(cbs, 0, dstSize).Value,
-                    AccessFlags.AccessTransferWriteBit,
-                    AccessFlags.AccessTransferReadBit,
-                    PipelineStageFlags.PipelineStageTransferBit,
-                    PipelineStageFlags.PipelineStageTransferBit,
-                    0,
-                    dstSize);
-
-                dst.Storage.CopyFromOrToBuffer(
-                    cbs.CommandBuffer,
-                    dstTempBuffer.GetBuffer().Get(cbs, 0, dstSize).Value,
-                    dst.GetImage().Get(cbs).Value,
-                    dstSize,
-                    to: false,
-                    drBaseX,
-                    drBaseY,
-                    dst.FirstLayer,
-                    dst.FirstLevel,
-                    1,
-                    levels,
-                    true,
-                    aspectFlags,
-                    false);
-            }
-
-            SlowBlit(d32SrcStorage, d32DstStorage, ImageAspectFlags.ImageAspectDepthBit);
-            SlowBlit(s8SrcStorage, s8DstStorage, ImageAspectFlags.ImageAspectStencilBit);
+                ImageAspectFlags.ColorBit,
+                ImageAspectFlags.ColorBit);
         }
 
         public static unsafe void InsertImageBarrier(
@@ -759,13 +479,6 @@ namespace Ryujinx.Graphics.Vulkan
                 memoryBarrier);
         }
 
-        private bool SupportsBlitFromD32FS8ToD32FAndS8()
-        {
-            var formatFeatureFlags = FormatFeatureFlags.FormatFeatureBlitSrcBit | FormatFeatureFlags.FormatFeatureBlitDstBit;
-            return _gd.FormatCapabilities.FormatSupports(formatFeatureFlags, GAL.Format.D32Float)  &&
-                   _gd.FormatCapabilities.FormatSupports(formatFeatureFlags, GAL.Format.S8Uint);
-        }
-
         public TextureView GetView(GAL.Format format)
         {
             if (format == Info.Format)
@@ -805,7 +518,7 @@ namespace Ryujinx.Graphics.Vulkan
             return CreateViewImpl(info, firstLayer, firstLevel);
         }
 
-        private TextureView CreateViewImpl(TextureCreateInfo info, int firstLayer, int firstLevel)
+        public TextureView CreateViewImpl(TextureCreateInfo info, int firstLayer, int firstLevel)
         {
             return new TextureView(_gd, _device, info, Storage, FirstLayer + firstLayer, FirstLevel + firstLevel);
         }
@@ -820,7 +533,7 @@ namespace Ryujinx.Graphics.Vulkan
                 var buffer = bufferHolder.GetBuffer(cbs.CommandBuffer).Get(cbs).Value;
                 var image = GetImage().Get(cbs).Value;
 
-                CopyFromOrToBuffer(cbs.CommandBuffer, buffer, image, size, true, x, y, width, height);
+                CopyFromOrToBuffer(cbs.CommandBuffer, buffer, image, size, true, 0, 0, x, y, width, height);
             }
 
             bufferHolder.WaitForFences();
@@ -829,7 +542,7 @@ namespace Ryujinx.Graphics.Vulkan
             return bitmap;
         }
 
-        public ReadOnlySpan<byte> GetData()
+        public PinnedSpan<byte> GetData()
         {
             BackgroundResource resources = _gd.BackgroundResources.Get();
 
@@ -837,15 +550,15 @@ namespace Ryujinx.Graphics.Vulkan
             {
                 _gd.FlushAllCommands();
 
-                return GetData(_gd.CommandBufferPool, resources.GetFlushBuffer());
+                return new PinnedSpan<byte>(GetData(_gd.CommandBufferPool, resources.GetFlushBuffer()));
             }
             else
             {
-                return GetData(resources.GetPool(), resources.GetFlushBuffer());
+                return new PinnedSpan<byte>(GetData(resources.GetPool(), resources.GetFlushBuffer()));
             }
         }
 
-        public ReadOnlySpan<byte> GetData(int layer, int level)
+        public PinnedSpan<byte> GetData(int layer, int level)
         {
             BackgroundResource resources = _gd.BackgroundResources.Get();
 
@@ -853,11 +566,11 @@ namespace Ryujinx.Graphics.Vulkan
             {
                 _gd.FlushAllCommands();
 
-                return GetData(_gd.CommandBufferPool, resources.GetFlushBuffer(), layer, level);
+                return new PinnedSpan<byte>(GetData(_gd.CommandBufferPool, resources.GetFlushBuffer(), layer, level));
             }
             else
             {
-                return GetData(resources.GetPool(), resources.GetFlushBuffer(), layer, level);
+                return new PinnedSpan<byte>(GetData(resources.GetPool(), resources.GetFlushBuffer(), layer, level));
             }
         }
 
@@ -884,17 +597,22 @@ namespace Ryujinx.Graphics.Vulkan
             return GetDataFromBuffer(result, size, result);
         }
 
-        public void SetData(ReadOnlySpan<byte> data)
+        public void SetData(SpanOrArray<byte> data)
         {
             SetData(data, 0, 0, Info.GetLayers(), Info.Levels, singleSlice: false);
         }
 
-        public void SetData(ReadOnlySpan<byte> data, int layer, int level)
+        public void SetData(SpanOrArray<byte> data, int layer, int level)
         {
             SetData(data, layer, level, 1, 1, singleSlice: true);
         }
 
-        private void SetData(ReadOnlySpan<byte> data, int layer, int level, int layers, int levels, bool singleSlice)
+        public void SetData(SpanOrArray<byte> data, int layer, int level, Rectangle<int> region)
+        {
+            SetData(data, layer, level, 1, 1, singleSlice: true, region);
+        }
+
+        private void SetData(ReadOnlySpan<byte> data, int layer, int level, int layers, int levels, bool singleSlice, Rectangle<int>? region = null)
         {
             int bufferDataLength = GetBufferDataLength(data.Length);
 
@@ -918,7 +636,25 @@ namespace Ryujinx.Graphics.Vulkan
             var buffer = bufferHolder.GetBuffer(cbs.CommandBuffer).Get(cbs).Value;
             var image = imageAuto.Get(cbs).Value;
 
-            CopyFromOrToBuffer(cbs.CommandBuffer, buffer, image, bufferDataLength, false, layer, level, layers, levels, singleSlice);
+            if (region.HasValue)
+            {
+                CopyFromOrToBuffer(
+                    cbs.CommandBuffer,
+                    buffer,
+                    image,
+                    bufferDataLength,
+                    false,
+                    layer,
+                    level,
+                    region.Value.X,
+                    region.Value.Y,
+                    region.Value.Width,
+                    region.Value.Height);
+            }
+            else
+            {
+                CopyFromOrToBuffer(cbs.CommandBuffer, buffer, image, bufferDataLength, false, layer, level, layers, levels, singleSlice);
+            }
         }
 
         private int GetBufferDataLength(int length)
@@ -997,7 +733,7 @@ namespace Ryujinx.Graphics.Vulkan
 
             for (int level = 0; level < levels; level++)
             {
-                int mipSize = GetBufferDataLength(Info.GetMipSize(dstLevel + level));
+                int mipSize = GetBufferDataLength(Info.GetMipSize2D(dstLevel + level) * dstLayers);
 
                 int endOffset = offset + mipSize;
 
@@ -1010,9 +746,9 @@ namespace Ryujinx.Graphics.Vulkan
 
                 var aspectFlags = Info.Format.ConvertAspectFlags();
 
-                if (aspectFlags == (ImageAspectFlags.ImageAspectDepthBit | ImageAspectFlags.ImageAspectStencilBit))
+                if (aspectFlags == (ImageAspectFlags.DepthBit | ImageAspectFlags.StencilBit))
                 {
-                    aspectFlags = ImageAspectFlags.ImageAspectDepthBit;
+                    aspectFlags = ImageAspectFlags.DepthBit;
                 }
 
                 var sl = new ImageSubresourceLayers(
@@ -1060,6 +796,8 @@ namespace Ryujinx.Graphics.Vulkan
             Image image,
             int size,
             bool to,
+            int dstLayer,
+            int dstLevel,
             int x,
             int y,
             int width,
@@ -1067,18 +805,26 @@ namespace Ryujinx.Graphics.Vulkan
         {
             var aspectFlags = Info.Format.ConvertAspectFlags();
 
-            if (aspectFlags == (ImageAspectFlags.ImageAspectDepthBit | ImageAspectFlags.ImageAspectStencilBit))
+            if (aspectFlags == (ImageAspectFlags.DepthBit | ImageAspectFlags.StencilBit))
             {
-                aspectFlags = ImageAspectFlags.ImageAspectDepthBit;
+                aspectFlags = ImageAspectFlags.DepthBit;
             }
 
-            var sl = new ImageSubresourceLayers(aspectFlags, (uint)FirstLevel, (uint)FirstLayer, 1);
+            var sl = new ImageSubresourceLayers(aspectFlags, (uint)(FirstLevel + dstLevel), (uint)(FirstLayer + dstLayer), 1);
 
             var extent = new Extent3D((uint)width, (uint)height, 1);
 
+            int rowLengthAlignment = Info.BlockWidth;
+
+            // We expect all data being written into the texture to have a stride aligned by 4.
+            if (!to && Info.BytesPerPixel < 4)
+            {
+                rowLengthAlignment = 4 / Info.BytesPerPixel;
+            }
+
             var region = new BufferImageCopy(
                 0,
-                (uint)AlignUpNpot(width, Info.BlockWidth),
+                (uint)AlignUpNpot(width, rowLengthAlignment),
                 (uint)AlignUpNpot(height, Info.BlockHeight),
                 sl,
                 new Offset3D(x, y, 0),

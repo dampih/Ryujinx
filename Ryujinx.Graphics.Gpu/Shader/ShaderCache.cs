@@ -26,7 +26,7 @@ namespace Ryujinx.Graphics.Gpu.Shader
         /// </summary>
         public const TranslationFlags DefaultFlags = TranslationFlags.DebugMode;
 
-        private struct TranslatedShader
+        private readonly struct TranslatedShader
         {
             public readonly CachedShaderStage Shader;
             public readonly ShaderProgram Program;
@@ -38,7 +38,7 @@ namespace Ryujinx.Graphics.Gpu.Shader
             }
         }
 
-        private struct TranslatedShaderVertexPair
+        private readonly struct TranslatedShaderVertexPair
         {
             public readonly CachedShaderStage VertexA;
             public readonly CachedShaderStage VertexB;
@@ -59,7 +59,7 @@ namespace Ryujinx.Graphics.Gpu.Shader
         private readonly Dictionary<ulong, CachedShaderProgram> _cpPrograms;
         private readonly Dictionary<ShaderAddresses, CachedShaderProgram> _gpPrograms;
 
-        private struct ProgramToSave
+        private readonly struct ProgramToSave
         {
             public readonly CachedShaderProgram CachedProgram;
             public readonly IProgram HostProgram;
@@ -203,12 +203,12 @@ namespace Ryujinx.Graphics.Gpu.Shader
             GpuChannelComputeState computeState,
             ulong gpuVa)
         {
-            if (_cpPrograms.TryGetValue(gpuVa, out var cpShader) && IsShaderEqual(channel, poolState, cpShader, gpuVa))
+            if (_cpPrograms.TryGetValue(gpuVa, out var cpShader) && IsShaderEqual(channel, poolState, computeState, cpShader, gpuVa))
             {
                 return cpShader;
             }
 
-            if (_computeShaderCache.TryFind(channel, poolState, gpuVa, out cpShader, out byte[] cachedGuestCode))
+            if (_computeShaderCache.TryFind(channel, poolState, computeState, gpuVa, out cpShader, out byte[] cachedGuestCode))
             {
                 _cpPrograms[gpuVa] = cpShader;
                 return cpShader;
@@ -300,16 +300,16 @@ namespace Ryujinx.Graphics.Gpu.Shader
             ref ThreedClassState state,
             ref ProgramPipelineState pipeline,
             GpuChannel channel,
-            GpuChannelPoolState poolState,
-            GpuChannelGraphicsState graphicsState,
+            ref GpuChannelPoolState poolState,
+            ref GpuChannelGraphicsState graphicsState,
             ShaderAddresses addresses)
         {
-            if (_gpPrograms.TryGetValue(addresses, out var gpShaders) && IsShaderEqual(channel, poolState, graphicsState, gpShaders, addresses))
+            if (_gpPrograms.TryGetValue(addresses, out var gpShaders) && IsShaderEqual(channel, ref poolState, ref graphicsState, gpShaders, addresses))
             {
                 return gpShaders;
             }
 
-            if (_graphicsShaderCache.TryFind(channel, poolState, graphicsState, addresses, out gpShaders, out var cachedGuestCode))
+            if (_graphicsShaderCache.TryFind(channel, ref poolState, ref graphicsState, addresses, out gpShaders, out var cachedGuestCode))
             {
                 _gpPrograms[addresses] = gpShaders;
                 return gpShaders;
@@ -353,8 +353,15 @@ namespace Ryujinx.Graphics.Gpu.Shader
                 }
             }
 
+            if (!_context.Capabilities.SupportsGeometryShader)
+            {
+                TryRemoveGeometryStage(translatorContexts);
+            }
+
             CachedShaderStage[] shaders = new CachedShaderStage[Constants.ShaderStages + 1];
             List<ShaderSource> shaderSources = new List<ShaderSource>();
+
+            TranslatorContext previousStage = null;
 
             for (int stageIndex = 0; stageIndex < Constants.ShaderStages; stageIndex++)
             {
@@ -392,6 +399,16 @@ namespace Ryujinx.Graphics.Gpu.Shader
                     {
                         shaderSources.Add(CreateShaderSource(program));
                     }
+
+                    previousStage = currentStage;
+                }
+                else if (
+                    previousStage != null &&
+                    previousStage.LayerOutputWritten &&
+                    stageIndex == 3 &&
+                    !_context.Capabilities.SupportsLayerVertexTessellation)
+                {
+                    shaderSources.Add(CreateShaderSource(previousStage.GenerateGeometryPassthrough()));
                 }
             }
 
@@ -407,6 +424,39 @@ namespace Ryujinx.Graphics.Gpu.Shader
             _gpPrograms[addresses] = gpShaders;
 
             return gpShaders;
+        }
+
+        /// <summary>
+        /// Tries to eliminate the geometry stage from the array of translator contexts.
+        /// </summary>
+        /// <param name="translatorContexts">Array of translator contexts</param>
+        public static void TryRemoveGeometryStage(TranslatorContext[] translatorContexts)
+        {
+            if (translatorContexts[4] != null)
+            {
+                // We have a geometry shader, but geometry shaders are not supported.
+                // Try to eliminate the geometry shader.
+
+                ShaderProgramInfo info = translatorContexts[4].Translate().Info;
+
+                if (info.Identification == ShaderIdentification.GeometryLayerPassthrough)
+                {
+                    // We managed to identify that this geometry shader is only used to set the output Layer value,
+                    // we can set the Layer on the previous stage instead (usually the vertex stage) and eliminate it.
+
+                    for (int i = 3; i >= 1; i--)
+                    {
+                        if (translatorContexts[i] != null)
+                        {
+                            translatorContexts[i].SetGeometryShaderLayerInputAttribute(info.GpLayerInputAttribute);
+                            translatorContexts[i].SetLastInVertexPipeline(translatorContexts[5] != null);
+                            break;
+                        }
+                    }
+
+                    translatorContexts[4] = null;
+                }
+            }
         }
 
         /// <summary>
@@ -473,18 +523,20 @@ namespace Ryujinx.Graphics.Gpu.Shader
         /// </summary>
         /// <param name="channel">GPU channel using the shader</param>
         /// <param name="poolState">GPU channel state to verify shader compatibility</param>
+        /// <param name="computeState">GPU channel compute state to verify shader compatibility</param>
         /// <param name="cpShader">Cached compute shader</param>
         /// <param name="gpuVa">GPU virtual address of the shader code in memory</param>
         /// <returns>True if the code is different, false otherwise</returns>
         private static bool IsShaderEqual(
             GpuChannel channel,
             GpuChannelPoolState poolState,
+            GpuChannelComputeState computeState,
             CachedShaderProgram cpShader,
             ulong gpuVa)
         {
             if (IsShaderEqual(channel.MemoryManager, cpShader.Shaders[0], gpuVa))
             {
-                return cpShader.SpecializationState.MatchesCompute(channel, poolState, true);
+                return cpShader.SpecializationState.MatchesCompute(channel, ref poolState, computeState, true);
             }
 
             return false;
@@ -501,8 +553,8 @@ namespace Ryujinx.Graphics.Gpu.Shader
         /// <returns>True if the code is different, false otherwise</returns>
         private static bool IsShaderEqual(
             GpuChannel channel,
-            GpuChannelPoolState poolState,
-            GpuChannelGraphicsState graphicsState,
+            ref GpuChannelPoolState poolState,
+            ref GpuChannelGraphicsState graphicsState,
             CachedShaderProgram gpShaders,
             ShaderAddresses addresses)
         {
@@ -520,7 +572,9 @@ namespace Ryujinx.Graphics.Gpu.Shader
                 }
             }
 
-            return gpShaders.SpecializationState.MatchesGraphics(channel, poolState, graphicsState, true);
+            bool usesDrawParameters = gpShaders.Shaders[1]?.Info.UsesDrawParameters ?? false;
+
+            return gpShaders.SpecializationState.MatchesGraphics(channel, ref poolState, ref graphicsState, usesDrawParameters, true);
         }
 
         /// <summary>

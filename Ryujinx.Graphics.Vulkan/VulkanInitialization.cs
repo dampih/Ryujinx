@@ -14,6 +14,9 @@ namespace Ryujinx.Graphics.Vulkan
     public unsafe static class VulkanInitialization
     {
         private const uint InvalidIndex = uint.MaxValue;
+        private static uint MinimalVulkanVersion = Vk.Version11.Value;
+        private static uint MinimalInstanceVulkanVersion = Vk.Version12.Value;
+        private static uint MaximumVulkanVersion = Vk.Version12.Value;
         private const string AppName = "Ryujinx.Graphics.Vulkan";
         private const int QueuesCount = 2;
 
@@ -21,23 +24,27 @@ namespace Ryujinx.Graphics.Vulkan
         {
             ExtConditionalRendering.ExtensionName,
             ExtExtendedDynamicState.ExtensionName,
+            ExtTransformFeedback.ExtensionName,
             KhrDrawIndirectCount.ExtensionName,
             KhrPushDescriptor.ExtensionName,
+            "VK_EXT_blend_operation_advanced",
             "VK_EXT_custom_border_color",
             "VK_EXT_descriptor_indexing", // Enabling this works around an issue with disposed buffer bindings on RADV.
             "VK_EXT_fragment_shader_interlock",
             "VK_EXT_index_type_uint8",
+            "VK_EXT_primitive_topology_list_restart",
             "VK_EXT_robustness2",
+            "VK_EXT_shader_stencil_export",
+            "VK_KHR_shader_float16_int8",
             "VK_EXT_shader_subgroup_ballot",
             "VK_EXT_subgroup_size_control",
-            "VK_NV_geometry_shader_passthrough"
+            "VK_NV_geometry_shader_passthrough",
+            "VK_KHR_portability_subset", // By spec, we should enable this if present.
         };
 
         public static string[] RequiredExtensions { get; } = new string[]
         {
-            KhrSwapchain.ExtensionName,
-            "VK_EXT_shader_subgroup_vote",
-            ExtTransformFeedback.ExtensionName
+            KhrSwapchain.ExtensionName
         };
 
         private static string[] _excludedMessages = new string[]
@@ -52,7 +59,7 @@ namespace Ryujinx.Graphics.Vulkan
             "VUID-VkSubpassDependency-srcSubpass-00867"
         };
 
-        internal static Instance CreateInstance(Vk api, GraphicsDebugLevel logLevel, string[] requiredExtensions, out ExtDebugReport debugReport, out DebugReportCallbackEXT debugReportCallback)
+        internal static Instance CreateInstance(Vk api, GraphicsDebugLevel logLevel, string[] requiredExtensions, out ExtDebugUtils debugUtils, out DebugUtilsMessengerEXT debugUtilsMessenger)
         {
             var enabledLayers = new List<string>();
 
@@ -88,7 +95,7 @@ namespace Ryujinx.Graphics.Vulkan
                 AddAvailableLayer("VK_LAYER_KHRONOS_validation");
             }
 
-            var enabledExtensions = requiredExtensions.Append(ExtDebugReport.ExtensionName).ToArray();
+            var enabledExtensions = requiredExtensions.Append(ExtDebugUtils.ExtensionName).ToArray();
 
             var appName = Marshal.StringToHGlobalAnsi(AppName);
 
@@ -98,7 +105,7 @@ namespace Ryujinx.Graphics.Vulkan
                 ApplicationVersion = 1,
                 PEngineName = (byte*)appName,
                 EngineVersion = 1,
-                ApiVersion = Vk.Version12.Value
+                ApiVersion = MaximumVulkanVersion
             };
 
             IntPtr* ppEnabledExtensions = stackalloc IntPtr[enabledExtensions.Length];
@@ -138,22 +145,18 @@ namespace Ryujinx.Graphics.Vulkan
                 Marshal.FreeHGlobal(ppEnabledLayers[i]);
             }
 
-            CreateDebugCallbacks(api, logLevel, instance, out debugReport, out debugReportCallback);
+            CreateDebugMessenger(api, logLevel, instance, out debugUtils, out debugUtilsMessenger);
 
             return instance;
         }
 
-        private unsafe static uint DebugReport(
-            uint flags,
-            DebugReportObjectTypeEXT objectType,
-            ulong @object,
-            nuint location,
-            int messageCode,
-            byte* layerPrefix,
-            byte* message,
-            void* userData)
+        private unsafe static uint DebugMessenger(
+            DebugUtilsMessageSeverityFlagsEXT messageSeverity,
+            DebugUtilsMessageTypeFlagsEXT messageTypes,
+            DebugUtilsMessengerCallbackDataEXT* pCallbackData,
+            void* pUserData)
         {
-            var msg = Marshal.PtrToStringAnsi((IntPtr)message);
+            var msg = Marshal.PtrToStringAnsi((IntPtr)pCallbackData->PMessage);
 
             foreach (string excludedMessagePart in _excludedMessages)
             {
@@ -163,26 +166,19 @@ namespace Ryujinx.Graphics.Vulkan
                 }
             }
 
-            DebugReportFlagsEXT debugFlags = (DebugReportFlagsEXT)flags;
-
-            if (debugFlags.HasFlag(DebugReportFlagsEXT.DebugReportErrorBitExt))
+            if (messageSeverity.HasFlag(DebugUtilsMessageSeverityFlagsEXT.ErrorBitExt))
             {
                 Logger.Error?.Print(LogClass.Gpu, msg);
-                //throw new Exception(msg);
             }
-            else if (debugFlags.HasFlag(DebugReportFlagsEXT.DebugReportWarningBitExt))
+            else if (messageSeverity.HasFlag(DebugUtilsMessageSeverityFlagsEXT.WarningBitExt))
             {
                 Logger.Warning?.Print(LogClass.Gpu, msg);
             }
-            else if (debugFlags.HasFlag(DebugReportFlagsEXT.DebugReportInformationBitExt))
+            else if (messageSeverity.HasFlag(DebugUtilsMessageSeverityFlagsEXT.InfoBitExt))
             {
                 Logger.Info?.Print(LogClass.Gpu, msg);
             }
-            else if (debugFlags.HasFlag(DebugReportFlagsEXT.DebugReportPerformanceWarningBitExt))
-            {
-                Logger.Warning?.Print(LogClass.Gpu, msg);
-            }
-            else
+            else // if (messageSeverity.HasFlag(DebugUtilsMessageSeverityFlagsEXT.VerboseBitExt))
             {
                 Logger.Debug?.Print(LogClass.Gpu, msg);
             }
@@ -234,7 +230,7 @@ namespace Ryujinx.Graphics.Vulkan
                 ApplicationVersion = 1,
                 PEngineName = (byte*)appName,
                 EngineVersion = 1,
-                ApiVersion = Vk.Version12.Value
+                ApiVersion = MaximumVulkanVersion
             };
 
             var instanceCreateInfo = new InstanceCreateInfo
@@ -248,6 +244,27 @@ namespace Ryujinx.Graphics.Vulkan
             };
 
             api.CreateInstance(in instanceCreateInfo, null, out var instance).ThrowOnError();
+
+            // We ensure that vkEnumerateInstanceVersion is present (added in 1.1).
+            // If the instance doesn't support it, no device is going to be 1.1 compatible.
+            if (api.GetInstanceProcAddr(instance, "vkEnumerateInstanceVersion") == IntPtr.Zero)
+            {
+                api.DestroyInstance(instance, null);
+
+                return Array.Empty<DeviceInfo>();
+            }
+
+            // We currently assume that the instance is compatible with Vulkan 1.2
+            // TODO: Remove this once we relax our initialization codepaths.
+            uint instanceApiVerison = 0;
+            api.EnumerateInstanceVersion(ref instanceApiVerison).ThrowOnError();
+
+            if (instanceApiVerison < MinimalInstanceVulkanVersion)
+            {
+                api.DestroyInstance(instance, null);
+
+                return Array.Empty<DeviceInfo>();
+            }
 
             Marshal.FreeHGlobal(appName);
 
@@ -268,6 +285,11 @@ namespace Ryujinx.Graphics.Vulkan
             {
                 var physicalDevice = physicalDevices[i];
                 api.GetPhysicalDeviceProperties(physicalDevice, out var properties);
+
+                if (properties.ApiVersion < MinimalVulkanVersion)
+                {
+                    continue;
+                }
 
                 devices[i] = new DeviceInfo(
                     StringFromIdPair(properties.VendorID, properties.DeviceID),
@@ -327,7 +349,7 @@ namespace Ryujinx.Graphics.Vulkan
 
         internal static uint FindSuitableQueueFamily(Vk api, PhysicalDevice physicalDevice, SurfaceKHR surface, out uint queueCount)
         {
-            const QueueFlags RequiredFlags = QueueFlags.QueueGraphicsBit | QueueFlags.QueueComputeBit;
+            const QueueFlags RequiredFlags = QueueFlags.GraphicsBit | QueueFlags.ComputeBit;
 
             var khrSurface = new KhrSurface(api.Context);
 
@@ -384,50 +406,137 @@ namespace Ryujinx.Graphics.Vulkan
             api.GetPhysicalDeviceProperties(physicalDevice, out var properties);
             bool useRobustBufferAccess = VendorUtils.FromId(properties.VendorID) == Vendor.Nvidia;
 
-            var supportedFeatures = api.GetPhysicalDeviceFeature(physicalDevice);
+            PhysicalDeviceFeatures2 features2 = new PhysicalDeviceFeatures2()
+            {
+                SType = StructureType.PhysicalDeviceFeatures2
+            };
+
+            PhysicalDeviceVulkan11Features supportedFeaturesVk11 = new PhysicalDeviceVulkan11Features()
+            {
+                SType = StructureType.PhysicalDeviceVulkan11Features,
+                PNext = features2.PNext
+            };
+
+            features2.PNext = &supportedFeaturesVk11;
+
+            PhysicalDeviceCustomBorderColorFeaturesEXT supportedFeaturesCustomBorderColor = new PhysicalDeviceCustomBorderColorFeaturesEXT()
+            {
+                SType = StructureType.PhysicalDeviceCustomBorderColorFeaturesExt,
+                PNext = features2.PNext
+            };
+
+            if (supportedExtensions.Contains("VK_EXT_custom_border_color"))
+            {
+                features2.PNext = &supportedFeaturesCustomBorderColor;
+            }
+
+            PhysicalDevicePrimitiveTopologyListRestartFeaturesEXT supportedFeaturesPrimitiveTopologyListRestart = new PhysicalDevicePrimitiveTopologyListRestartFeaturesEXT()
+            {
+                SType = StructureType.PhysicalDevicePrimitiveTopologyListRestartFeaturesExt,
+                PNext = features2.PNext
+            };
+
+            if (supportedExtensions.Contains("VK_EXT_primitive_topology_list_restart"))
+            {
+                features2.PNext = &supportedFeaturesPrimitiveTopologyListRestart;
+            }
+
+            PhysicalDeviceTransformFeedbackFeaturesEXT supportedFeaturesTransformFeedback = new PhysicalDeviceTransformFeedbackFeaturesEXT()
+            {
+                SType = StructureType.PhysicalDeviceTransformFeedbackFeaturesExt,
+                PNext = features2.PNext
+            };
+
+            if (supportedExtensions.Contains(ExtTransformFeedback.ExtensionName))
+            {
+                features2.PNext = &supportedFeaturesTransformFeedback;
+            }
+
+            PhysicalDeviceRobustness2FeaturesEXT supportedFeaturesRobustness2 = new PhysicalDeviceRobustness2FeaturesEXT()
+            {
+                SType = StructureType.PhysicalDeviceRobustness2FeaturesExt
+            };
+
+            if (supportedExtensions.Contains("VK_EXT_robustness2"))
+            {
+                supportedFeaturesRobustness2.PNext = features2.PNext;
+
+                features2.PNext = &supportedFeaturesRobustness2;
+            }
+
+            api.GetPhysicalDeviceFeatures2(physicalDevice, &features2);
+
+            var supportedFeatures = features2.Features;
 
             var features = new PhysicalDeviceFeatures()
             {
                 DepthBiasClamp = true,
-                DepthClamp = true,
-                DualSrcBlend = true,
+                DepthClamp = supportedFeatures.DepthClamp,
+                DualSrcBlend = supportedFeatures.DualSrcBlend,
                 FragmentStoresAndAtomics = true,
-                GeometryShader = true,
+                GeometryShader = supportedFeatures.GeometryShader,
                 ImageCubeArray = true,
                 IndependentBlend = true,
-                LogicOp = true,
-                MultiViewport = true,
-                PipelineStatisticsQuery = true,
+                LogicOp = supportedFeatures.LogicOp,
+                OcclusionQueryPrecise = supportedFeatures.OcclusionQueryPrecise,
+                MultiViewport = supportedFeatures.MultiViewport,
+                PipelineStatisticsQuery = supportedFeatures.PipelineStatisticsQuery,
                 SamplerAnisotropy = true,
                 ShaderClipDistance = true,
                 ShaderFloat64 = supportedFeatures.ShaderFloat64,
-                ShaderImageGatherExtended = true,
+                ShaderImageGatherExtended = supportedFeatures.ShaderImageGatherExtended,
+                ShaderStorageImageMultisample = supportedFeatures.ShaderStorageImageMultisample,
                 // ShaderStorageImageReadWithoutFormat = true,
                 // ShaderStorageImageWriteWithoutFormat = true,
-                TessellationShader = true,
+                TessellationShader = supportedFeatures.TessellationShader,
                 VertexPipelineStoresAndAtomics = true,
                 RobustBufferAccess = useRobustBufferAccess
             };
 
             void* pExtendedFeatures = null;
 
-            var featuresTransformFeedback = new PhysicalDeviceTransformFeedbackFeaturesEXT()
+            PhysicalDeviceTransformFeedbackFeaturesEXT featuresTransformFeedback;
+
+            if (supportedExtensions.Contains(ExtTransformFeedback.ExtensionName))
             {
-                SType = StructureType.PhysicalDeviceTransformFeedbackFeaturesExt,
-                PNext = pExtendedFeatures,
-                TransformFeedback = true
-            };
+                featuresTransformFeedback = new PhysicalDeviceTransformFeedbackFeaturesEXT()
+                {
+                    SType = StructureType.PhysicalDeviceTransformFeedbackFeaturesExt,
+                    PNext = pExtendedFeatures,
+                    TransformFeedback = supportedFeaturesTransformFeedback.TransformFeedback
+                };
 
-            pExtendedFeatures = &featuresTransformFeedback;
+                pExtendedFeatures = &featuresTransformFeedback;
+            }
 
-            var featuresRobustness2 = new PhysicalDeviceRobustness2FeaturesEXT()
+            PhysicalDevicePrimitiveTopologyListRestartFeaturesEXT featuresPrimitiveTopologyListRestart;
+
+            if (supportedExtensions.Contains("VK_EXT_primitive_topology_list_restart"))
             {
-                SType = StructureType.PhysicalDeviceRobustness2FeaturesExt,
-                PNext = pExtendedFeatures,
-                NullDescriptor = true
-            };
+                featuresPrimitiveTopologyListRestart = new PhysicalDevicePrimitiveTopologyListRestartFeaturesEXT()
+                {
+                    SType = StructureType.PhysicalDevicePrimitiveTopologyListRestartFeaturesExt,
+                    PNext = pExtendedFeatures,
+                    PrimitiveTopologyListRestart = supportedFeaturesPrimitiveTopologyListRestart.PrimitiveTopologyListRestart,
+                    PrimitiveTopologyPatchListRestart = supportedFeaturesPrimitiveTopologyListRestart.PrimitiveTopologyPatchListRestart
+                };
 
-            pExtendedFeatures = &featuresRobustness2;
+                pExtendedFeatures = &featuresPrimitiveTopologyListRestart;
+            }
+
+            PhysicalDeviceRobustness2FeaturesEXT featuresRobustness2;
+
+            if (supportedExtensions.Contains("VK_EXT_robustness2"))
+            {
+                featuresRobustness2 = new PhysicalDeviceRobustness2FeaturesEXT()
+                {
+                    SType = StructureType.PhysicalDeviceRobustness2FeaturesExt,
+                    PNext = pExtendedFeatures,
+                    NullDescriptor = supportedFeaturesRobustness2.NullDescriptor
+                };
+
+                pExtendedFeatures = &featuresRobustness2;
+            }
 
             var featuresExtendedDynamicState = new PhysicalDeviceExtendedDynamicStateFeaturesEXT()
             {
@@ -442,7 +551,7 @@ namespace Ryujinx.Graphics.Vulkan
             {
                 SType = StructureType.PhysicalDeviceVulkan11Features,
                 PNext = pExtendedFeatures,
-                ShaderDrawParameters = true
+                ShaderDrawParameters = supportedFeaturesVk11.ShaderDrawParameters
             };
 
             pExtendedFeatures = &featuresVk11;
@@ -452,7 +561,8 @@ namespace Ryujinx.Graphics.Vulkan
                 SType = StructureType.PhysicalDeviceVulkan12Features,
                 PNext = pExtendedFeatures,
                 DescriptorIndexing = supportedExtensions.Contains("VK_EXT_descriptor_indexing"),
-                DrawIndirectCount = supportedExtensions.Contains(KhrDrawIndirectCount.ExtensionName)
+                DrawIndirectCount = supportedExtensions.Contains(KhrDrawIndirectCount.ExtensionName),
+                UniformBufferStandardLayout = supportedExtensions.Contains("VK_KHR_uniform_buffer_standard_layout")
             };
 
             pExtendedFeatures = &featuresVk12;
@@ -497,6 +607,23 @@ namespace Ryujinx.Graphics.Vulkan
                 };
 
                 pExtendedFeatures = &featuresSubgroupSizeControl;
+            }
+
+            PhysicalDeviceCustomBorderColorFeaturesEXT featuresCustomBorderColor;
+
+            if (supportedExtensions.Contains("VK_EXT_custom_border_color") &&
+                supportedFeaturesCustomBorderColor.CustomBorderColors &&
+                supportedFeaturesCustomBorderColor.CustomBorderColorWithoutFormat)
+            {
+                featuresCustomBorderColor = new PhysicalDeviceCustomBorderColorFeaturesEXT()
+                {
+                    SType = StructureType.PhysicalDeviceCustomBorderColorFeaturesExt,
+                    PNext = pExtendedFeatures,
+                    CustomBorderColors = true,
+                    CustomBorderColorWithoutFormat = true,
+                };
+
+                pExtendedFeatures = &featuresCustomBorderColor;
             }
 
             var enabledExtensions = RequiredExtensions.Union(DesirableExtensions.Intersect(supportedExtensions)).ToArray();
@@ -550,46 +677,59 @@ namespace Ryujinx.Graphics.Vulkan
             return new CommandBufferPool(api, device, queue, queueLock, queueFamilyIndex);
         }
 
-        internal unsafe static void CreateDebugCallbacks(
+        internal unsafe static void CreateDebugMessenger(
             Vk api,
             GraphicsDebugLevel logLevel,
             Instance instance,
-            out ExtDebugReport debugReport,
-            out DebugReportCallbackEXT debugReportCallback)
+            out ExtDebugUtils debugUtils,
+            out DebugUtilsMessengerEXT debugUtilsMessenger)
         {
-            debugReport = default;
+            debugUtils = default;
 
             if (logLevel != GraphicsDebugLevel.None)
             {
-                if (!api.TryGetInstanceExtension(instance, out debugReport))
+                if (!api.TryGetInstanceExtension(instance, out debugUtils))
                 {
-                    debugReportCallback = default;
+                    debugUtilsMessenger = default;
                     return;
                 }
 
-                var flags = logLevel switch
+                var filterLogType = logLevel switch
                 {
-                    GraphicsDebugLevel.Error => DebugReportFlagsEXT.DebugReportErrorBitExt,
-                    GraphicsDebugLevel.Slowdowns => DebugReportFlagsEXT.DebugReportErrorBitExt | DebugReportFlagsEXT.DebugReportPerformanceWarningBitExt,
-                    GraphicsDebugLevel.All => DebugReportFlagsEXT.DebugReportInformationBitExt |
-                                              DebugReportFlagsEXT.DebugReportWarningBitExt |
-                                              DebugReportFlagsEXT.DebugReportPerformanceWarningBitExt |
-                                              DebugReportFlagsEXT.DebugReportErrorBitExt |
-                                              DebugReportFlagsEXT.DebugReportDebugBitExt,
+                    GraphicsDebugLevel.Error => DebugUtilsMessageTypeFlagsEXT.ValidationBitExt,
+                    GraphicsDebugLevel.Slowdowns => DebugUtilsMessageTypeFlagsEXT.ValidationBitExt |
+                                                    DebugUtilsMessageTypeFlagsEXT.PerformanceBitExt,
+                    GraphicsDebugLevel.All => DebugUtilsMessageTypeFlagsEXT.GeneralBitExt |
+                                              DebugUtilsMessageTypeFlagsEXT.ValidationBitExt |
+                                              DebugUtilsMessageTypeFlagsEXT.PerformanceBitExt,
                     _ => throw new ArgumentException($"Invalid log level \"{logLevel}\".")
                 };
-                var debugReportCallbackCreateInfo = new DebugReportCallbackCreateInfoEXT()
+
+                var filterLogSeverity = logLevel switch
                 {
-                    SType = StructureType.DebugReportCallbackCreateInfoExt,
-                    Flags = flags,
-                    PfnCallback = new PfnDebugReportCallbackEXT(DebugReport)
+                    GraphicsDebugLevel.Error => DebugUtilsMessageSeverityFlagsEXT.ErrorBitExt,
+                    GraphicsDebugLevel.Slowdowns => DebugUtilsMessageSeverityFlagsEXT.ErrorBitExt |
+                                                    DebugUtilsMessageSeverityFlagsEXT.WarningBitExt,
+                    GraphicsDebugLevel.All => DebugUtilsMessageSeverityFlagsEXT.InfoBitExt |
+                                              DebugUtilsMessageSeverityFlagsEXT.WarningBitExt |
+                                              DebugUtilsMessageSeverityFlagsEXT.VerboseBitExt |
+                                              DebugUtilsMessageSeverityFlagsEXT.ErrorBitExt,
+                    _ => throw new ArgumentException($"Invalid log level \"{logLevel}\".")
                 };
 
-                debugReport.CreateDebugReportCallback(instance, in debugReportCallbackCreateInfo, null, out debugReportCallback).ThrowOnError();
+                var debugUtilsMessengerCreateInfo = new DebugUtilsMessengerCreateInfoEXT()
+                {
+                    SType = StructureType.DebugUtilsMessengerCreateInfoExt,
+                    MessageType = filterLogType,
+                    MessageSeverity = filterLogSeverity,
+                    PfnUserCallback = new PfnDebugUtilsMessengerCallbackEXT(DebugMessenger)
+                };
+
+                debugUtils.CreateDebugUtilsMessenger(instance, in debugUtilsMessengerCreateInfo, null, out debugUtilsMessenger).ThrowOnError();
             }
             else
             {
-                debugReportCallback = default;
+                debugUtilsMessenger = default;
             }
         }
     }

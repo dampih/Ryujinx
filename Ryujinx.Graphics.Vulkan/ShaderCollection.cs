@@ -15,16 +15,17 @@ namespace Ryujinx.Graphics.Vulkan
 
         private readonly PipelineLayoutCacheEntry _plce;
 
-        public PipelineLayout PipelineLayout => _plce.PipelineLayout;
-
         public bool HasMinimalLayout { get; }
         public bool UsePushDescriptors { get; }
+        public bool IsCompute { get; }
 
         public uint Stages { get; }
 
         public int[][][] Bindings { get; }
 
         public ProgramLinkStatus LinkStatus { get; private set; }
+
+        public readonly SpecDescription[] SpecDescriptions;
 
         public bool IsLinked
         {
@@ -40,28 +41,34 @@ namespace Ryujinx.Graphics.Vulkan
         }
 
         private HashTableSlim<PipelineUid, Auto<DisposablePipeline>> _graphicsPipelineCache;
-        private Auto<DisposablePipeline> _computePipeline;
+        private HashTableSlim<SpecData, Auto<DisposablePipeline>> _computePipelineCache;
 
         private VulkanRenderer _gd;
         private Device _device;
         private bool _initialized;
-        private bool _isCompute;
 
         private ProgramPipelineState _state;
         private DisposableRenderPass _dummyRenderPass;
         private Task _compileTask;
         private bool _firstBackgroundUse;
 
-        public ShaderCollection(VulkanRenderer gd, Device device, ShaderSource[] shaders, bool isMinimal = false)
+        public ShaderCollection(VulkanRenderer gd, Device device, ShaderSource[] shaders, SpecDescription[] specDescription = null, bool isMinimal = false)
         {
             _gd = gd;
             _device = device;
+
+            if (specDescription != null && specDescription.Length != shaders.Length)
+            {
+                throw new ArgumentException($"{nameof(specDescription)} array length must match {nameof(shaders)} array if provided");
+            }
 
             gd.Shaders.Add(this);
 
             var internalShaders = new Shader[shaders.Length];
 
             _infos = new PipelineShaderStageCreateInfo[shaders.Length];
+
+            SpecDescriptions = specDescription;
 
             LinkStatus = ProgramLinkStatus.Incomplete;
 
@@ -73,16 +80,16 @@ namespace Ryujinx.Graphics.Vulkan
 
                 stages |= 1u << shader.StageFlags switch
                 {
-                    ShaderStageFlags.ShaderStageFragmentBit => 1,
-                    ShaderStageFlags.ShaderStageGeometryBit => 2,
-                    ShaderStageFlags.ShaderStageTessellationControlBit => 3,
-                    ShaderStageFlags.ShaderStageTessellationEvaluationBit => 4,
+                    ShaderStageFlags.FragmentBit => 1,
+                    ShaderStageFlags.GeometryBit => 2,
+                    ShaderStageFlags.TessellationControlBit => 3,
+                    ShaderStageFlags.TessellationEvaluationBit => 4,
                     _ => 0
                 };
 
-                if (shader.StageFlags == ShaderStageFlags.ShaderStageComputeBit)
+                if (shader.StageFlags == ShaderStageFlags.ComputeBit)
                 {
-                    _isCompute = true;
+                    IsCompute = true;
                 }
 
                 internalShaders[i] = shader;
@@ -90,14 +97,14 @@ namespace Ryujinx.Graphics.Vulkan
 
             _shaders = internalShaders;
 
-            bool usePd = !isMinimal && VulkanConfiguration.UsePushDescriptors && _gd.Capabilities.SupportsPushDescriptors;
+            bool usePushDescriptors = !isMinimal && VulkanConfiguration.UsePushDescriptors && _gd.Capabilities.SupportsPushDescriptors;
 
             _plce = isMinimal
                 ? gd.PipelineLayoutCache.Create(gd, device, shaders)
-                : gd.PipelineLayoutCache.GetOrCreate(gd, device, stages, usePd);
+                : gd.PipelineLayoutCache.GetOrCreate(gd, device, stages, usePushDescriptors);
 
             HasMinimalLayout = isMinimal;
-            UsePushDescriptors = usePd;
+            UsePushDescriptors = usePushDescriptors;
 
             Stages = stages;
 
@@ -154,7 +161,7 @@ namespace Ryujinx.Graphics.Vulkan
 
             try
             {
-                if (_isCompute)
+                if (IsCompute)
                 {
                     CreateBackgroundComputePipeline();
                 }
@@ -225,7 +232,6 @@ namespace Ryujinx.Graphics.Vulkan
 
             pipeline.Stages[0] = _shaders[0].GetInfo();
             pipeline.StagesCount = 1;
-            pipeline.PipelineLayout = PipelineLayout;
 
             pipeline.CreateComputePipeline(_gd, _device, this, (_gd.Pipeline as PipelineBase).PipelineCache);
             pipeline.Dispose();
@@ -245,7 +251,7 @@ namespace Ryujinx.Graphics.Vulkan
             PipelineState pipeline = _state.ToVulkanPipelineState(_gd);
 
             // Copy the shader stage info to the pipeline.
-            var stages = pipeline.Stages.ToSpan();
+            var stages = pipeline.Stages.AsSpan();
 
             for (int i = 0; i < _shaders.Length; i++)
             {
@@ -253,7 +259,6 @@ namespace Ryujinx.Graphics.Vulkan
             }
 
             pipeline.StagesCount = (uint)_shaders.Length;
-            pipeline.PipelineLayout = PipelineLayout;
 
             pipeline.CreateGraphicsPipeline(_gd, _device, this, (_gd.Pipeline as PipelineBase).PipelineCache, renderPass.Value);
             pipeline.Dispose();
@@ -314,14 +319,9 @@ namespace Ryujinx.Graphics.Vulkan
             return null;
         }
 
-        public void AddComputePipeline(Auto<DisposablePipeline> pipeline)
+        public void AddComputePipeline(ref SpecData key, Auto<DisposablePipeline> pipeline)
         {
-            _computePipeline = pipeline;
-        }
-
-        public void RemoveComputePipeline()
-        {
-            _computePipeline = null;
+            (_computePipelineCache ??= new()).Add(ref key, pipeline);
         }
 
         public void AddGraphicsPipeline(ref PipelineUid key, Auto<DisposablePipeline> pipeline)
@@ -329,10 +329,20 @@ namespace Ryujinx.Graphics.Vulkan
             (_graphicsPipelineCache ??= new()).Add(ref key, pipeline);
         }
 
-        public bool TryGetComputePipeline(out Auto<DisposablePipeline> pipeline)
+        public bool TryGetComputePipeline(ref SpecData key, out Auto<DisposablePipeline> pipeline)
         {
-            pipeline = _computePipeline;
-            return pipeline != null;
+            if (_computePipelineCache == null)
+            {
+                pipeline = default;
+                return false;
+            }
+
+            if (_computePipelineCache.TryGetValue(ref key, out pipeline))
+            {
+                return true;
+            }
+
+            return false;
         }
 
         public bool TryGetGraphicsPipeline(ref PipelineUid key, out Auto<DisposablePipeline> pipeline)
@@ -368,6 +378,27 @@ namespace Ryujinx.Graphics.Vulkan
             return _plce.GetNewDescriptorSetCollection(gd, commandBufferIndex, setIndex, out isNew);
         }
 
+        public PipelineLayout GetPipelineLayout(VulkanRenderer gd, uint bindlessTextureCount, uint bindlessSamplersCount)
+        {
+            return GetPipelineLayoutCacheEntry(gd, bindlessTextureCount, bindlessSamplersCount).PipelineLayout;
+        }
+
+        public PipelineLayoutCacheEntry GetPipelineLayoutCacheEntry(VulkanRenderer gd, uint bindlessTextureCount, uint bindlessSamplersCount)
+        {
+            if ((bindlessTextureCount | bindlessSamplersCount) == 0)
+            {
+                return _plce;
+            }
+
+            var usageInfo = new PipelineLayoutUsageInfo(
+                Stages,
+                bindlessTextureCount,
+                bindlessSamplersCount,
+                UsePushDescriptors);
+
+            return gd.PipelineLayoutCache.GetOrCreate(gd, _device, usageInfo);
+        }
+
         protected virtual unsafe void Dispose(bool disposing)
         {
             if (disposing)
@@ -390,7 +421,14 @@ namespace Ryujinx.Graphics.Vulkan
                     }
                 }
 
-                _computePipeline?.Dispose();
+                if (_computePipelineCache != null)
+                {
+                    foreach (Auto<DisposablePipeline> pipeline in _computePipelineCache.Values)
+                    {
+                        pipeline.Dispose();
+                    }
+                }
+
                 if (_dummyRenderPass.Value.Handle != 0)
                 {
                     _dummyRenderPass.Dispose();

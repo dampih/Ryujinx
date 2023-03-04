@@ -37,7 +37,12 @@ namespace Ryujinx.Graphics.Shader.StructuredIr
 
             Config = config;
 
-            if (config.GpPassthrough)
+            if (config.Stage == ShaderStage.TessellationControl)
+            {
+                // Required to index outputs.
+                Info.Inputs.Add(AttributeConsts.InvocationId);
+            }
+            else if (config.GpPassthrough)
             {
                 int passthroughAttributes = config.PassthroughAttributes;
                 while (passthroughAttributes != 0)
@@ -75,9 +80,9 @@ namespace Ryujinx.Graphics.Shader.StructuredIr
         public void EnterFunction(
             int blocksCount,
             string name,
-            VariableType returnType,
-            VariableType[] inArguments,
-            VariableType[] outArguments)
+            AggregateType returnType,
+            AggregateType[] inArguments,
+            AggregateType[] outArguments)
         {
             _loopTails = new HashSet<BasicBlock>();
 
@@ -213,7 +218,7 @@ namespace Ryujinx.Graphics.Shader.StructuredIr
                 return gotoTempAsg;
             }
 
-            AstOperand gotoTemp = NewTemp(VariableType.Bool);
+            AstOperand gotoTemp = NewTemp(AggregateType.Bool);
 
             gotoTempAsg = Assign(gotoTemp, Const(IrConsts.False));
 
@@ -301,7 +306,7 @@ namespace Ryujinx.Graphics.Shader.StructuredIr
             return _gotos.ToArray();
         }
 
-        private AstOperand NewTemp(VariableType type)
+        public AstOperand NewTemp(AggregateType type)
         {
             AstOperand newTemp = Local(type);
 

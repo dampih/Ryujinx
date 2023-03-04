@@ -21,8 +21,33 @@ namespace Ryujinx.Graphics.Shader.Translation
 
         public int OperationsCount => _operations.Count;
 
+        private readonly struct BrxTarget
+        {
+            public readonly Operand Selector;
+            public readonly int ExpectedValue;
+            public readonly ulong NextTargetAddress;
+
+            public BrxTarget(Operand selector, int expectedValue, ulong nextTargetAddress)
+            {
+                Selector = selector;
+                ExpectedValue = expectedValue;
+                NextTargetAddress = nextTargetAddress;
+            }
+        }
+
+        private class BlockLabel
+        {
+            public readonly Operand Label;
+            public BrxTarget BrxTarget;
+
+            public BlockLabel(Operand label)
+            {
+                Label = label;
+            }
+        }
+
         private readonly List<Operation> _operations;
-        private readonly Dictionary<ulong, Operand> _labels;
+        private readonly Dictionary<ulong, BlockLabel> _labels;
 
         public EmitterContext(DecodedProgram program, ShaderConfig config, bool isNonMain)
         {
@@ -30,7 +55,7 @@ namespace Ryujinx.Graphics.Shader.Translation
             Config = config;
             IsNonMain = isNonMain;
             _operations = new List<Operation>();
-            _labels = new Dictionary<ulong, Operand>();
+            _labels = new Dictionary<ulong, BlockLabel>();
 
             EmitStart();
         }
@@ -84,10 +109,10 @@ namespace Ryujinx.Graphics.Shader.Translation
             TextureFlags flags,
             int handle,
             int compIndex,
-            Operand dest,
+            Operand[] dests,
             params Operand[] sources)
         {
-            return CreateTextureOperation(inst, type, TextureFormat.Unknown, flags, handle, compIndex, dest, sources);
+            return CreateTextureOperation(inst, type, TextureFormat.Unknown, flags, handle, compIndex, dests, sources);
         }
 
         public TextureOperation CreateTextureOperation(
@@ -97,7 +122,7 @@ namespace Ryujinx.Graphics.Shader.Translation
             TextureFlags flags,
             int handle,
             int compIndex,
-            Operand dest,
+            Operand[] dests,
             params Operand[] sources)
         {
             if (!flags.HasFlag(TextureFlags.Bindless))
@@ -105,7 +130,7 @@ namespace Ryujinx.Graphics.Shader.Translation
                 Config.SetUsedTexture(inst, type, format, flags, TextureOperation.DefaultCbufSlot, handle);
             }
 
-            return new TextureOperation(inst, type, format, flags, handle, compIndex, dest, sources);
+            return new TextureOperation(inst, type, format, flags, handle, compIndex, dests, sources);
         }
 
         public void FlagAttributeRead(int attribute)
@@ -158,14 +183,40 @@ namespace Ryujinx.Graphics.Shader.Translation
 
         public Operand GetLabel(ulong address)
         {
-            if (!_labels.TryGetValue(address, out Operand label))
-            {
-                label = Label();
+            return EnsureBlockLabel(address).Label;
+        }
 
-                _labels.Add(address, label);
+        public void SetBrxTarget(ulong address, Operand selector, int targetValue, ulong nextTargetAddress)
+        {
+            BlockLabel blockLabel = EnsureBlockLabel(address);
+            Debug.Assert(blockLabel.BrxTarget.Selector == null);
+            blockLabel.BrxTarget = new BrxTarget(selector, targetValue, nextTargetAddress);
+        }
+
+        public void EnterBlock(ulong address)
+        {
+            BlockLabel blockLabel = EnsureBlockLabel(address);
+
+            MarkLabel(blockLabel.Label);
+
+            BrxTarget brxTarget = blockLabel.BrxTarget;
+
+            if (brxTarget.Selector != null)
+            {
+                this.BranchIfFalse(GetLabel(brxTarget.NextTargetAddress), this.ICompareEqual(brxTarget.Selector, Const(brxTarget.ExpectedValue)));
+            }
+        }
+
+        private BlockLabel EnsureBlockLabel(ulong address)
+        {
+            if (!_labels.TryGetValue(address, out BlockLabel blockLabel))
+            {
+                blockLabel = new BlockLabel(Label());
+
+                _labels.Add(address, blockLabel);
             }
 
-            return label;
+            return blockLabel;
         }
 
         public void PrepareForVertexReturn()
@@ -189,6 +240,13 @@ namespace Ryujinx.Graphics.Shader.Translation
                 Operand halfW = this.FPMultiply(w, ConstF(0.5f));
 
                 this.Copy(Attribute(AttributeConsts.PositionZ), this.FPFusedMultiplyAdd(z, ConstF(0.5f), halfW));
+            }
+
+            if (Config.Stage != ShaderStage.Geometry && Config.HasLayerInputAttribute)
+            {
+                Config.SetUsedFeature(FeatureFlags.RtLayer);
+
+                this.Copy(Attribute(AttributeConsts.Layer), Attribute(Config.GpLayerInputAttribute | AttributeConsts.LoadOutputMask));
             }
         }
 
@@ -248,7 +306,7 @@ namespace Ryujinx.Graphics.Shader.Translation
                     this.Copy(Attribute(index + 12), w);
                 }
 
-                if (Config.GpPassthrough)
+                if (Config.GpPassthrough && !Config.GpuAccessor.QueryHostSupportsGeometryShaderPassthrough())
                 {
                     int inputVertices = Config.GpuAccessor.QueryPrimitiveTopology().ToInputVertices();
 
@@ -261,7 +319,7 @@ namespace Ryujinx.Graphics.Shader.Translation
                         {
                             int index = BitOperations.TrailingZeroCount(passthroughAttributes);
                             WriteOutput(AttributeConsts.UserAttributeBase + index * 16, primIndex);
-                            Config.SetOutputUserAttribute(index, perPatch: false);
+                            Config.SetOutputUserAttribute(index);
                             passthroughAttributes &= ~(1 << index);
                         }
 
@@ -364,7 +422,7 @@ namespace Ryujinx.Graphics.Shader.Translation
                     bool targetEnabled = (Config.OmapTargets & (0xf << (rtIndex * 4))) != 0;
                     if (targetEnabled)
                     {
-                        Config.SetOutputUserAttribute(rtIndex, perPatch: false);
+                        Config.SetOutputUserAttribute(rtIndex);
                         regIndexBase += 4;
                     }
                 }

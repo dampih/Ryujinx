@@ -9,8 +9,6 @@ namespace Ryujinx.Graphics.OpenGL.Image
     {
         private readonly OpenGLRenderer _renderer;
 
-        public IntermmediatePool IntermmediatePool { get; }
-
         private int _srcFramebuffer;
         private int _dstFramebuffer;
 
@@ -20,7 +18,6 @@ namespace Ryujinx.Graphics.OpenGL.Image
         public TextureCopy(OpenGLRenderer renderer)
         {
             _renderer = renderer;
-            IntermmediatePool = new IntermmediatePool(renderer);
         }
 
         public void Copy(
@@ -367,7 +364,7 @@ namespace Ryujinx.Graphics.OpenGL.Image
             return to;
         }
 
-        private TextureView PboCopy(TextureView from, TextureView to, int srcLayer, int dstLayer, int srcLevel, int dstLevel, int width, int height)
+        public void PboCopy(TextureView from, TextureView to, int srcLayer, int dstLayer, int srcLevel, int dstLevel, int width, int height)
         {
             int dstWidth = width;
             int dstHeight = height;
@@ -445,8 +442,6 @@ namespace Ryujinx.Graphics.OpenGL.Image
             }
 
             GL.BindBuffer(BufferTarget.PixelUnpackBuffer, 0);
-
-            return to;
         }
 
         private void EnsurePbo(TextureView view)
@@ -517,8 +512,6 @@ namespace Ryujinx.Graphics.OpenGL.Image
 
                 _copyPboHandle = 0;
             }
-
-            IntermmediatePool.Dispose();
         }
     }
 }

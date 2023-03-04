@@ -1,4 +1,5 @@
 ﻿using Ryujinx.Graphics.GAL;
+using System;
 
 namespace Ryujinx.Graphics.Gpu.Engine.Threed
 {

@@ -119,7 +119,7 @@ namespace Ryujinx.Audio.Renderer.Server
                 ref VoiceChannelResource resource = ref context.GetChannelResource(i);
 
                 resource.Id = parameter.Id;
-                parameter.Mix.ToSpan().CopyTo(resource.Mix.ToSpan());
+                parameter.Mix.AsSpan().CopyTo(resource.Mix.AsSpan());
                 resource.IsUsed = parameter.IsUsed;
             }
 
@@ -240,6 +240,10 @@ namespace Ryujinx.Audio.Renderer.Server
                 case EffectType.CaptureBuffer:
                     effect = new CaptureBufferEffect();
                     break;
+                case EffectType.Compressor:
+                    effect = new CompressorEffect();
+                    break;
+
                 default:
                     throw new NotImplementedException($"EffectType {parameter.Type} not implemented!");
             }
@@ -587,7 +591,7 @@ namespace Ryujinx.Audio.Renderer.Server
         {
             ref BehaviourErrorInfoOutStatus outStatus = ref SpanIOHelper.GetWriteRef<BehaviourErrorInfoOutStatus>(ref _output)[0];
 
-            _behaviourContext.CopyErrorInfo(outStatus.ErrorInfos.ToSpan(), out outStatus.ErrorInfosCount);
+            _behaviourContext.CopyErrorInfo(outStatus.ErrorInfos.AsSpan(), out outStatus.ErrorInfosCount);
 
             OutputHeader.BehaviourSize = (uint)Unsafe.SizeOf<BehaviourErrorInfoOutStatus>();
             OutputHeader.TotalSize += OutputHeader.BehaviourSize;

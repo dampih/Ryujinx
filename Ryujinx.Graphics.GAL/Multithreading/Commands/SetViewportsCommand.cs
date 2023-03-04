@@ -1,10 +1,9 @@
 ﻿using Ryujinx.Graphics.GAL.Multithreading.Model;
 using System;
-using System.Buffers;
 
 namespace Ryujinx.Graphics.GAL.Multithreading.Commands
 {
-    struct SetViewportsCommand : IGALCommand
+    struct SetViewportsCommand : IGALCommand, IGALCommand<SetViewportsCommand>
     {
         public CommandType CommandType => CommandType.SetViewports;
         private SpanRef<Viewport> _viewports;

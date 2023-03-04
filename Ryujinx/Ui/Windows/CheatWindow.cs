@@ -6,8 +6,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 
-using GUI        = Gtk.Builder.ObjectAttribute;
-using JsonHelper = Ryujinx.Common.Utilities.JsonHelper;
+using GUI = Gtk.Builder.ObjectAttribute;
 
 namespace Ryujinx.Ui.Windows
 {
@@ -18,16 +17,18 @@ namespace Ryujinx.Ui.Windows
 
 #pragma warning disable CS0649, IDE0044
         [GUI] Label    _baseTitleInfoLabel;
+        [GUI] TextView _buildIdTextView;
         [GUI] TreeView _cheatTreeView;
         [GUI] Button   _saveButton;
 #pragma warning restore CS0649, IDE0044
 
-        public CheatWindow(VirtualFileSystem virtualFileSystem, ulong titleId, string titleName) : this(new Builder("Ryujinx.Ui.Windows.CheatWindow.glade"), virtualFileSystem, titleId, titleName) { }
+        public CheatWindow(VirtualFileSystem virtualFileSystem, ulong titleId, string titleName, string gameBuildId) : this(new Builder("Ryujinx.Ui.Windows.CheatWindow.glade"), virtualFileSystem, titleId, titleName, gameBuildId) { }
 
-        private CheatWindow(Builder builder, VirtualFileSystem virtualFileSystem, ulong titleId, string titleName) : base(builder.GetObject("_cheatWindow").Handle)
+        private CheatWindow(Builder builder, VirtualFileSystem virtualFileSystem, ulong titleId, string titleName, string gameBuildId) : base(builder.GetRawOwnedObject("_cheatWindow"))
         {
             builder.Autoconnect(this);
             _baseTitleInfoLabel.Text = $"Cheats Available for {titleName} [{titleId:X16}]";
+            _buildIdTextView.Buffer.Text = $"BID: {gameBuildId}";
 
             string modsBasePath  = virtualFileSystem.ModLoader.GetModsBasePath();
             string titleModsPath = virtualFileSystem.ModLoader.GetTitleDir(modsBasePath, titleId.ToString("X16"));

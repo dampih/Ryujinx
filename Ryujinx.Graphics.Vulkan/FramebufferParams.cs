@@ -23,7 +23,7 @@ namespace Ryujinx.Graphics.Vulkan
         public int[] AttachmentIndices { get; }
 
         public int AttachmentsCount { get; }
-        public int MaxColorAttachmentIndex { get; }
+        public int MaxColorAttachmentIndex => AttachmentIndices.Length > 0 ? AttachmentIndices[AttachmentIndices.Length - 1] : -1;
         public bool HasDepthStencil { get; }
         public int ColorAttachmentsCount => AttachmentsCount - (HasDepthStencil ? 1 : 0);
 
@@ -32,20 +32,21 @@ namespace Ryujinx.Graphics.Vulkan
             Auto<DisposableImageView> view,
             uint width,
             uint height,
+            uint samples,
             bool isDepthStencil,
             VkFormat format)
         {
             _device = device;
             _attachments = new[] { view };
-            _validColorAttachments = 1u;
+            _validColorAttachments = isDepthStencil ? 0u : 1u;
 
             Width = width;
             Height = height;
             Layers = 1;
 
-            AttachmentSamples = new[] { 1u };
+            AttachmentSamples = new[] { samples };
             AttachmentFormats = new[] { format };
-            AttachmentIndices = new[] { 0 };
+            AttachmentIndices = isDepthStencil ? Array.Empty<int>() : new[] { 0 };
 
             AttachmentsCount = 1;
 
@@ -65,8 +66,7 @@ namespace Ryujinx.Graphics.Vulkan
 
             AttachmentSamples = new uint[count];
             AttachmentFormats = new VkFormat[count];
-            AttachmentIndices = new int[count];
-            MaxColorAttachmentIndex = colors.Length - 1;
+            AttachmentIndices = new int[colorsCount];
 
             uint width = uint.MaxValue;
             uint height = uint.MaxValue;
@@ -139,6 +139,25 @@ namespace Ryujinx.Graphics.Vulkan
             return _attachments[index];
         }
 
+        public ComponentType GetAttachmentComponentType(int index)
+        {
+            if (_colors != null && (uint)index < _colors.Length)
+            {
+                var format = _colors[index].Info.Format;
+
+                if (format.IsSint())
+                {
+                    return ComponentType.SignedInteger;
+                }
+                else if (format.IsUint())
+                {
+                    return ComponentType.UnsignedInteger;
+                }
+            }
+
+            return ComponentType.Float;
+        }
+
         public bool IsValidColorAttachment(int bindIndex)
         {
             return (uint)bindIndex < Constants.MaxRenderTargets && (_validColorAttachments & (1u << bindIndex)) != 0;
@@ -149,14 +168,14 @@ namespace Ryujinx.Graphics.Vulkan
             return texture is TextureView view && view.Valid;
         }
 
-        public ClearRect GetClearRect(Rectangle<int> scissor, int layer)
+        public ClearRect GetClearRect(Rectangle<int> scissor, int layer, int layerCount)
         {
             int x = scissor.X;
             int y = scissor.Y;
             int width = Math.Min((int)Width - scissor.X, scissor.Width);
             int height = Math.Min((int)Height - scissor.Y, scissor.Height);
 
-            return new ClearRect(new Rect2D(new Offset2D(x, y), new Extent2D((uint)width, (uint)height)), (uint)layer, 1);
+            return new ClearRect(new Rect2D(new Offset2D(x, y), new Extent2D((uint)width, (uint)height)), (uint)layer, (uint)layerCount);
         }
 
         public unsafe Auto<DisposableFramebuffer> Create(Vk api, CommandBufferScoped cbs, Auto<DisposableRenderPass> renderPass)
@@ -190,14 +209,14 @@ namespace Ryujinx.Graphics.Vulkan
                 for (int index = 0; index < _colors.Length; index++)
                 {
                     _colors[index].Storage.SetModification(
-                        AccessFlags.AccessColorAttachmentWriteBit,
-                        PipelineStageFlags.PipelineStageColorAttachmentOutputBit);
+                        AccessFlags.ColorAttachmentWriteBit,
+                        PipelineStageFlags.ColorAttachmentOutputBit);
                 }
             }
 
             _depthStencil?.Storage.SetModification(
-                AccessFlags.AccessDepthStencilAttachmentWriteBit,
-                PipelineStageFlags.PipelineStageColorAttachmentOutputBit);
+                AccessFlags.DepthStencilAttachmentWriteBit,
+                PipelineStageFlags.ColorAttachmentOutputBit);
         }
     }
 }

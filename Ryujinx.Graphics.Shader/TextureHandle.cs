@@ -13,6 +13,10 @@ namespace Ryujinx.Graphics.Shader
 
     public static class TextureHandle
     {
+        public const int MaxTexturesPerStage = 30;
+        public const int DefaultCbufSlot = -1;
+        public const int NvnTextureBufferIndex = 2;
+
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static int PackSlots(int cbufSlot0, int cbufSlot1)
         {
@@ -88,7 +92,7 @@ namespace Ryujinx.Graphics.Shader
         {
             (int textureWordOffset, int samplerWordOffset, TextureHandleType handleType) = UnpackOffsets(wordOffset);
 
-            int handle = cachedTextureBuffer[textureWordOffset];
+            int handle = cachedTextureBuffer.Length != 0 ? cachedTextureBuffer[textureWordOffset] : 0;
 
             // The "wordOffset" (which is really the immediate value used on texture instructions on the shader)
             // is a 13-bit value. However, in order to also support separate samplers and textures (which uses
@@ -102,7 +106,7 @@ namespace Ryujinx.Graphics.Shader
 
                 if (handleType != TextureHandleType.SeparateConstantSamplerHandle)
                 {
-                    samplerHandle = cachedSamplerBuffer[samplerWordOffset];
+                    samplerHandle = cachedSamplerBuffer.Length != 0 ? cachedSamplerBuffer[samplerWordOffset] : 0;
                 }
                 else
                 {

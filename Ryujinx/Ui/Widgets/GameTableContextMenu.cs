@@ -17,7 +17,6 @@ using Ryujinx.HLE.HOS;
 using Ryujinx.HLE.HOS.Services.Account.Acc;
 using Ryujinx.Ui.Common.Configuration;
 using Ryujinx.Ui.Common.Helper;
-using Ryujinx.Ui.Helper;
 using Ryujinx.Ui.Windows;
 using System;
 using System.Buffers;
@@ -455,7 +454,8 @@ namespace Ryujinx.Ui.Widgets
 
         private void ManageCheats_Clicked(object sender, EventArgs args)
         {
-            new CheatWindow(_virtualFileSystem, _titleId, _titleName).Show();
+            new CheatWindow(_virtualFileSystem, _titleId, _titleName,
+                GameDataExtractor.GetGameBuildId(_virtualFileSystem, _titleFilePath)).Show();
         }
 
         private void OpenTitleModDir_Clicked(object sender, EventArgs args)
@@ -523,7 +523,7 @@ namespace Ryujinx.Ui.Widgets
             DirectoryInfo mainDir   = new DirectoryInfo(System.IO.Path.Combine(AppDataManager.GamesDirPath, _titleIdText, "cache", "cpu", "0"));
             DirectoryInfo backupDir = new DirectoryInfo(System.IO.Path.Combine(AppDataManager.GamesDirPath, _titleIdText, "cache", "cpu", "1"));
 
-            MessageDialog warningDialog = GtkDialog.CreateConfirmationDialog("Warning", $"You are about to delete the PPTC cache for :\n\n<b>{_titleName}</b>\n\nAre you sure you want to proceed?");
+            MessageDialog warningDialog = GtkDialog.CreateConfirmationDialog("Warning", $"You are about to queue a PPTC rebuild on the next boot of:\n\n<b>{_titleName}</b>\n\nAre you sure you want to proceed?");
 
             List<FileInfo> cacheFiles = new List<FileInfo>();
 

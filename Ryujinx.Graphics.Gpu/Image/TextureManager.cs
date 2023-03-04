@@ -1,6 +1,7 @@
 ﻿using Ryujinx.Graphics.GAL;
 using Ryujinx.Graphics.Gpu.Engine.Types;
 using Ryujinx.Graphics.Gpu.Shader;
+using Ryujinx.Graphics.Shader;
 using System;
 
 namespace Ryujinx.Graphics.Gpu.Image
@@ -57,45 +58,21 @@ namespace Ryujinx.Graphics.Gpu.Image
         }
 
         /// <summary>
-        /// Rents the texture bindings array of the compute pipeline.
+        /// Sets the texture and image bindings for the compute pipeline.
         /// </summary>
-        /// <param name="count">The number of bindings needed</param>
-        /// <returns>The texture bindings array</returns>
-        public TextureBindingInfo[] RentComputeTextureBindings(int count)
+        /// <param name="bindings">Bindings for the active shader</param>
+        public void SetComputeBindings(CachedShaderBindings bindings)
         {
-            return _cpBindingsManager.RentTextureBindings(0, count);
+            _cpBindingsManager.SetBindings(bindings);
         }
 
         /// <summary>
-        /// Rents the texture bindings array for a given stage on the graphics pipeline.
+        /// Sets the texture and image bindings for the graphics pipeline.
         /// </summary>
-        /// <param name="stage">The index of the shader stage to bind the textures</param>
-        /// <param name="count">The number of bindings needed</param>
-        /// <returns>The texture bindings array</returns>
-        public TextureBindingInfo[] RentGraphicsTextureBindings(int stage, int count)
+        /// <param name="bindings">Bindings for the active shader</param>
+        public void SetGraphicsBindings(CachedShaderBindings bindings)
         {
-            return _gpBindingsManager.RentTextureBindings(stage, count);
-        }
-
-        /// <summary>
-        /// Rents the image bindings array of the compute pipeline.
-        /// </summary>
-        /// <param name="count">The number of bindings needed</param>
-        /// <returns>The image bindings array</returns>
-        public TextureBindingInfo[] RentComputeImageBindings(int count)
-        {
-            return _cpBindingsManager.RentImageBindings(0, count);
-        }
-
-        /// <summary>
-        /// Rents the image bindings array for a given stage on the graphics pipeline.
-        /// </summary>
-        /// <param name="stage">The index of the shader stage to bind the images</param>
-        /// <param name="count">The number of bindings needed</param>
-        /// <returns>The image bindings array</returns>
-        public TextureBindingInfo[] RentGraphicsImageBindings(int stage, int count)
-        {
-            return _gpBindingsManager.RentImageBindings(stage, count);
+            _gpBindingsManager.SetBindings(bindings);
         }
 
         /// <summary>
@@ -108,32 +85,12 @@ namespace Ryujinx.Graphics.Gpu.Image
         }
 
         /// <summary>
-        /// Sets the max binding indexes on the compute pipeline.
-        /// </summary>
-        /// <param name="maxTextureBinding">The maximum texture binding</param>
-        /// <param name="maxImageBinding">The maximum image binding</param>
-        public void SetComputeMaxBindings(int maxTextureBinding, int maxImageBinding)
-        {
-            _cpBindingsManager.SetMaxBindings(maxTextureBinding, maxImageBinding);
-        }
-
-        /// <summary>
         /// Sets the texture constant buffer index on the graphics pipeline.
         /// </summary>
         /// <param name="index">The texture constant buffer index</param>
         public void SetGraphicsTextureBufferIndex(int index)
         {
             _gpBindingsManager.SetTextureBufferIndex(index);
-        }
-
-        /// <summary>
-        /// Sets the max binding indexes on the graphics pipeline.
-        /// </summary>
-        /// <param name="maxTextureBinding">The maximum texture binding</param>
-        /// <param name="maxImageBinding">The maximum image binding</param>
-        public void SetGraphicsMaxBindings(int maxTextureBinding, int maxImageBinding)
-        {
-            _gpBindingsManager.SetMaxBindings(maxTextureBinding, maxImageBinding);
         }
 
         /// <summary>
@@ -479,22 +436,6 @@ namespace Ryujinx.Graphics.Gpu.Image
             {
                 _context.Renderer.Pipeline.SetRenderTargets(_rtHostColors, _rtHostDs);
             }
-        }
-
-        /// <summary>
-        /// Update host framebuffer attachments based on currently bound render target buffers.
-        /// </summary>
-        /// <remarks>
-        /// All attachments other than <paramref name="index"/> will be unbound.
-        /// </remarks>
-        /// <param name="index">Index of the render target color to be updated</param>
-        public void UpdateRenderTarget(int index)
-        {
-            new Span<ITexture>(_rtHostColors).Fill(null);
-            _rtHostColors[index] = _rtColors[index]?.HostTexture;
-            _rtHostDs = null;
-
-            _context.Renderer.Pipeline.SetRenderTargets(_rtHostColors, null);
         }
 
         /// <summary>

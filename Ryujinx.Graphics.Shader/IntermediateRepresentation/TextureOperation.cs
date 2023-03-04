@@ -19,8 +19,8 @@ namespace Ryujinx.Graphics.Shader.IntermediateRepresentation
             int cbufSlot,
             int handle,
             int compIndex,
-            Operand dest,
-            Operand[] sources) : base(inst, compIndex, dest, sources)
+            Operand[] dests,
+            Operand[] sources) : base(inst, compIndex, dests, sources)
         {
             Type = type;
             Format = format;
@@ -36,16 +36,9 @@ namespace Ryujinx.Graphics.Shader.IntermediateRepresentation
             TextureFlags flags,
             int handle,
             int compIndex,
-            Operand dest,
-            Operand[] sources) : this(inst, type, format, flags, DefaultCbufSlot, handle, compIndex, dest, sources)
+            Operand[] dests,
+            Operand[] sources) : this(inst, type, format, flags, DefaultCbufSlot, handle, compIndex, dests, sources)
         {
-        }
-
-        public void TurnIntoIndexed(int handle)
-        {
-            Type |= SamplerType.Indexed;
-            Flags &= ~TextureFlags.Bindless;
-            Handle = handle;
         }
 
         public void SetHandle(int handle, int cbufSlot = DefaultCbufSlot)
@@ -53,12 +46,25 @@ namespace Ryujinx.Graphics.Shader.IntermediateRepresentation
             if ((Flags & TextureFlags.Bindless) != 0)
             {
                 Flags &= ~TextureFlags.Bindless;
-
                 RemoveSource(0);
             }
 
             CbufSlot = cbufSlot;
             Handle = handle;
+        }
+
+        public void SetLodLevelFlag()
+        {
+            Flags |= TextureFlags.LodLevel;
+        }
+
+        public void TurnIntoBindless(Operand handle)
+        {
+            if ((Flags & TextureFlags.Bindless) == 0)
+            {
+                Flags |= TextureFlags.Bindless;
+                PrependSources(new Operand[] { handle });
+            }
         }
     }
 }

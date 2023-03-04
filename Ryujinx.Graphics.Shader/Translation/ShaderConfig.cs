@@ -9,16 +9,16 @@ namespace Ryujinx.Graphics.Shader.Translation
 {
     class ShaderConfig
     {
-        // TODO: Non-hardcoded array size.
-        public const int SamplerArraySize = 4;
-
         private const int ThreadsPerWarp = 32;
 
         public ShaderStage Stage { get; }
 
         public bool GpPassthrough { get; }
+        public bool LastInPipeline { get; private set; }
         public bool LastInVertexPipeline { get; private set; }
 
+        public bool HasLayerInputAttribute { get; private set; }
+        public int GpLayerInputAttribute { get; private set; }
         public int ThreadsPerInputPrimitive { get; }
 
         public OutputTopology OutputTopology { get; }
@@ -45,56 +45,35 @@ namespace Ryujinx.Graphics.Shader.Translation
 
         public FeatureFlags UsedFeatures { get; private set; }
 
+        public BindlessTextureFlags BindlessTextureFlags { get; set; }
+
         public int Cb1DataSize { get; private set; }
+
+        public bool LayerOutputWritten { get; private set; }
+        public int LayerOutputAttribute { get; private set; }
 
         public bool NextUsesFixedFuncAttributes { get; private set; }
         public int UsedInputAttributes { get; private set; }
         public int UsedOutputAttributes { get; private set; }
-        public int UsedInputAttributesPerPatch { get; private set; }
-        public int UsedOutputAttributesPerPatch { get; private set; }
+        public HashSet<int> UsedInputAttributesPerPatch { get; }
+        public HashSet<int> UsedOutputAttributesPerPatch { get; }
+        public HashSet<int> NextUsedInputAttributesPerPatch { get; private set; }
         public int PassthroughAttributes { get; private set; }
         private int _nextUsedInputAttributes;
         private int _thisUsedInputAttributes;
+        private Dictionary<int, int> _perPatchAttributeLocations;
 
         public UInt128 NextInputAttributesComponents { get; private set; }
         public UInt128 ThisInputAttributesComponents { get; private set; }
-        public UInt128 NextInputAttributesPerPatchComponents { get; private set; }
-        public UInt128 ThisInputAttributesPerPatchComponents { get; private set; }
+
+        public int AccessibleStorageBuffersMask { get; private set; }
+        public int AccessibleConstantBuffersMask { get; private set; }
 
         private int _usedConstantBuffers;
         private int _usedStorageBuffers;
         private int _usedStorageBuffersWrite;
 
-        private struct TextureInfo : IEquatable<TextureInfo>
-        {
-            public int CbufSlot { get; }
-            public int Handle { get; }
-            public bool Indexed { get; }
-            public TextureFormat Format { get; }
-
-            public TextureInfo(int cbufSlot, int handle, bool indexed, TextureFormat format)
-            {
-                CbufSlot = cbufSlot;
-                Handle = handle;
-                Indexed = indexed;
-                Format = format;
-            }
-
-            public override bool Equals(object obj)
-            {
-                return obj is TextureInfo other && Equals(other);
-            }
-
-            public bool Equals(TextureInfo other)
-            {
-                return CbufSlot == other.CbufSlot && Handle == other.Handle && Indexed == other.Indexed && Format == other.Format;
-            }
-
-            public override int GetHashCode()
-            {
-                return HashCode.Combine(CbufSlot, Handle, Indexed, Format);
-            }
-        }
+        private readonly record struct TextureInfo(int CbufSlot, int Handle, TextureFormat Format);
 
         private struct TextureMeta
         {
@@ -119,11 +98,37 @@ namespace Ryujinx.Graphics.Shader.Translation
 
         public ShaderConfig(IGpuAccessor gpuAccessor, TranslationOptions options)
         {
-            Stage         = ShaderStage.Compute;
-            GpuAccessor   = gpuAccessor;
-            Options       = options;
+            Stage       = ShaderStage.Compute;
+            GpuAccessor = gpuAccessor;
+            Options     = options;
+
+            AccessibleStorageBuffersMask  = (1 << GlobalMemory.StorageMaxCount) - 1;
+            AccessibleConstantBuffersMask = (1 << GlobalMemory.UbeMaxCount) - 1;
+
+            UsedInputAttributesPerPatch  = new HashSet<int>();
+            UsedOutputAttributesPerPatch = new HashSet<int>();
+
             _usedTextures = new Dictionary<TextureInfo, TextureMeta>();
             _usedImages   = new Dictionary<TextureInfo, TextureMeta>();
+        }
+
+        public ShaderConfig(
+            ShaderStage stage,
+            OutputTopology outputTopology,
+            int maxOutputVertices,
+            IGpuAccessor gpuAccessor,
+            TranslationOptions options) : this(gpuAccessor, options)
+        {
+            Stage                    = stage;
+            ThreadsPerInputPrimitive = 1;
+            OutputTopology           = outputTopology;
+            MaxOutputVertices        = maxOutputVertices;
+            TransformFeedbackEnabled = gpuAccessor.QueryTransformFeedbackEnabled();
+
+            if (Stage != ShaderStage.Compute)
+            {
+                AccessibleConstantBuffersMask = 0;
+            }
         }
 
         public ShaderConfig(ShaderHeader header, IGpuAccessor gpuAccessor, TranslationOptions options) : this(gpuAccessor, options)
@@ -139,6 +144,7 @@ namespace Ryujinx.Graphics.Shader.Translation
             OmapSampleMask           = header.OmapSampleMask;
             OmapDepth                = header.OmapDepth;
             TransformFeedbackEnabled = gpuAccessor.QueryTransformFeedbackEnabled();
+            LastInPipeline           = true;
             LastInVertexPipeline     = header.Stage < ShaderStage.Fragment;
         }
 
@@ -210,6 +216,7 @@ namespace Ryujinx.Graphics.Shader.Translation
         {
             ClipDistancesWritten |= other.ClipDistancesWritten;
             UsedFeatures |= other.UsedFeatures;
+            BindlessTextureFlags |= other.BindlessTextureFlags;
 
             UsedInputAttributes |= other.UsedInputAttributes;
             UsedOutputAttributes |= other.UsedOutputAttributes;
@@ -234,6 +241,28 @@ namespace Ryujinx.Graphics.Shader.Translation
             }
         }
 
+        public void SetLayerOutputAttribute(int attr)
+        {
+            LayerOutputWritten = true;
+            LayerOutputAttribute = attr;
+        }
+
+        public void SetGeometryShaderLayerInputAttribute(int attr)
+        {
+            HasLayerInputAttribute = true;
+            GpLayerInputAttribute = attr;
+        }
+
+        public void SetLastInVertexPipeline(bool hasFragment)
+        {
+            if (!hasFragment)
+            {
+                LastInPipeline = true;
+            }
+
+            LastInVertexPipeline = true;
+        }
+
         public void SetInputUserAttributeFixedFunc(int index)
         {
             UsedInputAttributes |= 1 << index;
@@ -244,49 +273,76 @@ namespace Ryujinx.Graphics.Shader.Translation
             UsedOutputAttributes |= 1 << index;
         }
 
-        public void SetInputUserAttribute(int index, int component, bool perPatch)
+        public void SetInputUserAttribute(int index, int component)
         {
-            if (perPatch)
-            {
-                UsedInputAttributesPerPatch |= 1 << index;
-                ThisInputAttributesPerPatchComponents |= UInt128.Pow2(index * 4 + component);
-            }
-            else
-            {
-                int mask = 1 << index;
+            int mask = 1 << index;
 
-                UsedInputAttributes |= mask;
-                _thisUsedInputAttributes |= mask;
-                ThisInputAttributesComponents |= UInt128.Pow2(index * 4 + component);
-            }
+            UsedInputAttributes |= mask;
+            _thisUsedInputAttributes |= mask;
+            ThisInputAttributesComponents |= UInt128.One << (index * 4 + component);
         }
 
-        public void SetOutputUserAttribute(int index, bool perPatch)
+        public void SetInputUserAttributePerPatch(int index)
         {
-            if (perPatch)
-            {
-                UsedOutputAttributesPerPatch |= 1 << index;
-            }
-            else
-            {
-                UsedOutputAttributes |= 1 << index;
-            }
+            UsedInputAttributesPerPatch.Add(index);
+        }
+
+        public void SetOutputUserAttribute(int index)
+        {
+            UsedOutputAttributes |= 1 << index;
+        }
+
+        public void SetOutputUserAttributePerPatch(int index)
+        {
+            UsedOutputAttributesPerPatch.Add(index);
         }
 
         public void MergeFromtNextStage(ShaderConfig config)
         {
             NextInputAttributesComponents = config.ThisInputAttributesComponents;
-            NextInputAttributesPerPatchComponents = config.ThisInputAttributesPerPatchComponents;
+            NextUsedInputAttributesPerPatch = config.UsedInputAttributesPerPatch;
             NextUsesFixedFuncAttributes = config.UsedFeatures.HasFlag(FeatureFlags.FixedFuncAttr);
             MergeOutputUserAttributes(config.UsedInputAttributes, config.UsedInputAttributesPerPatch);
 
-            if (config.Stage != ShaderStage.Fragment)
+            if (UsedOutputAttributesPerPatch.Count != 0)
+            {
+                // Regular and per-patch input/output locations can't overlap,
+                // so we must assign on our location using unused regular input/output locations.
+
+                Dictionary<int, int> locationsMap = new Dictionary<int, int>();
+
+                int freeMask = ~UsedOutputAttributes;
+
+                foreach (int attr in UsedOutputAttributesPerPatch)
+                {
+                    int location = BitOperations.TrailingZeroCount(freeMask);
+                    if (location == 32)
+                    {
+                        config.GpuAccessor.Log($"No enough free locations for patch input/output 0x{attr:X}.");
+                        break;
+                    }
+
+                    locationsMap.Add(attr, location);
+                    freeMask &= ~(1 << location);
+                }
+
+                // Both stages must agree on the locations, so use the same "map" for both.
+                _perPatchAttributeLocations = locationsMap;
+                config._perPatchAttributeLocations = locationsMap;
+            }
+
+            LastInPipeline = false;
+
+            // We don't consider geometry shaders using the geometry shader passthrough feature
+            // as being the last because when this feature is used, it can't actually modify any of the outputs,
+            // so the stage that comes before it is the last one that can do modifications.
+            if (config.Stage != ShaderStage.Fragment && (config.Stage != ShaderStage.Geometry || !config.GpPassthrough))
             {
                 LastInVertexPipeline = false;
             }
         }
 
-        public void MergeOutputUserAttributes(int mask, int maskPerPatch)
+        public void MergeOutputUserAttributes(int mask, IEnumerable<int> perPatch)
         {
             _nextUsedInputAttributes = mask;
 
@@ -297,8 +353,18 @@ namespace Ryujinx.Graphics.Shader.Translation
             else
             {
                 UsedOutputAttributes |= mask;
-                UsedOutputAttributesPerPatch |= maskPerPatch;
+                UsedOutputAttributesPerPatch.UnionWith(perPatch);
             }
+        }
+
+        public int GetPerPatchAttributeLocation(int index)
+        {
+            if (_perPatchAttributeLocations == null || !_perPatchAttributeLocations.TryGetValue(index, out int location))
+            {
+                return index;
+            }
+
+            return location;
         }
 
         public bool IsUsedOutputAttribute(int attr)
@@ -363,6 +429,12 @@ namespace Ryujinx.Graphics.Shader.Translation
             UsedFeatures |= flags;
         }
 
+        public void SetAccessibleBufferMasks(int sbMask, int ubeMask)
+        {
+            AccessibleStorageBuffersMask = sbMask;
+            AccessibleConstantBuffersMask = ubeMask;
+        }
+
         public void SetUsedConstantBuffer(int slot)
         {
             _usedConstantBuffers |= 1 << slot;
@@ -418,7 +490,6 @@ namespace Ryujinx.Graphics.Shader.Translation
             bool coherent)
         {
             var dimensions = type.GetDimensions();
-            var isIndexed = type.HasFlag(SamplerType.Indexed);
 
             var usageFlags = TextureUsageFlags.None;
 
@@ -426,7 +497,7 @@ namespace Ryujinx.Graphics.Shader.Translation
             {
                 usageFlags |= TextureUsageFlags.NeedsScaleValue;
 
-                var canScale = Stage.SupportsRenderScale() && !isIndexed && !write && dimensions == 2;
+                var canScale = Stage.SupportsRenderScale() && !write && dimensions == 2;
 
                 if (!canScale)
                 {
@@ -446,26 +517,21 @@ namespace Ryujinx.Graphics.Shader.Translation
                 usageFlags |= TextureUsageFlags.ImageCoherent;
             }
 
-            int arraySize = isIndexed ? SamplerArraySize : 1;
-
-            for (int layer = 0; layer < arraySize; layer++)
+            var info = new TextureInfo(cbufSlot, handle, format);
+            var meta = new TextureMeta()
             {
-                var info = new TextureInfo(cbufSlot, handle + layer * 2, isIndexed, format);
-                var meta = new TextureMeta()
-                {
-                    AccurateType = accurateType,
-                    Type = type,
-                    UsageFlags = usageFlags
-                };
+                AccurateType = accurateType,
+                Type = type,
+                UsageFlags = usageFlags
+            };
 
-                if (dict.TryGetValue(info, out var existingMeta))
-                {
-                    dict[info] = MergeTextureMeta(meta, existingMeta);
-                }
-                else
-                {
-                    dict.Add(info, meta);
-                }
+            if (dict.TryGetValue(info, out var existingMeta))
+            {
+                dict[info] = MergeTextureMeta(meta, existingMeta);
+            }
+            else
+            {
+                dict.Add(info, meta);
             }
         }
 
@@ -589,7 +655,7 @@ namespace Ryujinx.Graphics.Shader.Translation
             var descriptors = new TextureDescriptor[dict.Count];
 
             int i = 0;
-            foreach (var kv in dict.OrderBy(x => x.Key.Indexed).OrderBy(x => x.Key.Handle))
+            foreach (var kv in dict.OrderBy(x => x.Key.Handle))
             {
                 var info = kv.Key;
                 var meta = kv.Value;
@@ -650,6 +716,24 @@ namespace Ryujinx.Graphics.Shader.Translation
         public int FindImageDescriptorIndex(AstTextureOperation texOp)
         {
             return FindDescriptorIndex(GetImageDescriptors(), texOp);
+        }
+
+        public ShaderProgramInfo CreateProgramInfo(ShaderIdentification identification = ShaderIdentification.None)
+        {
+            return new ShaderProgramInfo(
+                GetConstantBufferDescriptors(),
+                GetStorageBufferDescriptors(),
+                GetTextureDescriptors(),
+                GetImageDescriptors(),
+                identification,
+                GpLayerInputAttribute,
+                Stage,
+                BindlessTextureFlags,
+                UsedFeatures.HasFlag(FeatureFlags.InstanceId),
+                UsedFeatures.HasFlag(FeatureFlags.DrawParameters),
+                UsedFeatures.HasFlag(FeatureFlags.RtLayer),
+                ClipDistancesWritten,
+                OmapTargets);
         }
     }
 }
